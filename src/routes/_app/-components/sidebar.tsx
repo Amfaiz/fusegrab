@@ -2,7 +2,9 @@ import type { DownloadItem } from './types'
 
 import { useState } from 'react'
 
-import { Folder, FolderOpen, Video } from '#/components/icons'
+import { ExternalLink, Folder, FolderOpen, Video } from '#/components/icons'
+
+import amfaizIcon from '../../../../assets/amfaiz-icon.png'
 
 import { UpdatePanel } from './update-panel'
 
@@ -36,7 +38,7 @@ export function DownloaderSidebar({
     )
 
     return (
-        <aside className="border-border bg-surface flex w-56 shrink-0 flex-col justify-between border-r pt-1.5 pr-0 pb-3 select-none">
+        <aside className="border-border bg-surface flex w-56 shrink-0 flex-col justify-between border-r pt-1.5 pr-0 select-none">
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2 pl-2">
                 <div>
                     <div className="bg-surface text-muted-foreground sticky top-0 z-10 px-2 pt-1 pb-1.5 text-[10px] font-semibold tracking-wider uppercase">
@@ -143,6 +145,32 @@ export function DownloaderSidebar({
                 </div>
             </div>
             <UpdatePanel />
+
+            <div className="border-border flex w-full items-start border-t p-2.5">
+                <a
+                    href="https://amfaiz.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:bg-muted flex grow items-center gap-1.5 rounded-md p-1.75 transition-colors"
+                >
+                    <img
+                        src={amfaizIcon}
+                        alt="amfaiz"
+                        className="size-4 object-contain"
+                    />
+                    <span
+                        className="text-foreground text-sm leading-none"
+                        style={{
+                            fontFamily:
+                                '"Noto Serif", Georgia, "Times New Roman", serif',
+                        }}
+                    >
+                        amfaiz
+                    </span>
+
+                    <ExternalLink className="ml-auto size-3" />
+                </a>
+            </div>
         </aside>
     )
 }
