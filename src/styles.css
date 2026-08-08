@@ -1,0 +1,183 @@
+@import 'tailwindcss';
+/* Geist — Vercel's interface typeface. Tighter and more geometric than Inter at
+   the small sizes the tool panels use, and its mono companion gives the
+   timecodes and counters real tabular figures. */
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+@custom-variant dark (&:is(.dark *));
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+    min-height: 100%;
+}
+
+body {
+    margin: 0;
+}
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', system-ui, sans-serif;
+    --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-surface: var(--surface);
+    --color-popover: var(--popover);
+    --color-border: var(--border);
+    --color-border-strong: var(--border-strong);
+    --color-ring: var(--ring);
+    --color-danger: var(--danger);
+    --color-success: var(--success);
+
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    /* Filled control surfaces: segmented tracks, hover states, progress rails. */
+    --muted: oklch(0.968 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    /* Raised-on-hover surface, one step above --muted. */
+    --accent: oklch(0.945 0 0);
+    /* Inputs and cards sitting on --background. */
+    --surface: oklch(1 0 0);
+    --popover: oklch(1 0 0);
+    --border: oklch(0.922 0 0);
+    --border-strong: oklch(0.858 0 0);
+    --ring: oklch(0.708 0 0);
+    --danger: oklch(0.577 0.245 27.325);
+    --success: oklch(0.596 0.145 163.225);
+    --radius: 0.625rem;
+
+    /* Scrollbar thumb, tuned per theme so the same rule works in both. */
+    --scrollbar-thumb: oklch(0.145 0 0 / 18%);
+    --scrollbar-thumb-hover: oklch(0.145 0 0 / 32%);
+}
+
+.dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --muted: oklch(1 0 0 / 6%);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(1 0 0 / 10%);
+    --surface: oklch(0.205 0 0);
+    --popover: oklch(0.225 0 0);
+    --border: oklch(1 0 0 / 10%);
+    --border-strong: oklch(1 0 0 / 18%);
+    --ring: oklch(0.556 0 0);
+    --danger: oklch(0.704 0.191 22.216);
+    --success: oklch(0.696 0.17 162.48);
+
+    --scrollbar-thumb: oklch(1 0 0 / 20%);
+    --scrollbar-thumb-hover: oklch(1 0 0 / 34%);
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+    button:not(:disabled),
+    [role='button']:not(:disabled) {
+        cursor: pointer;
+    }
+
+    /* On macOS the title bar is a `-webkit-app-region: drag` strip laid across
+       the top of the window (see routes/_app/layout.tsx). A draggable region is
+       hit-tested by the window server *before* the page sees the event, so
+       `pointer-events: none` doesn't save controls that fall underneath it —
+       they simply stop responding, and the click drags the window instead.
+       Opting every interactive element out is the only reliable answer, and it
+       keeps the empty parts of the strip draggable. */
+    a,
+    button,
+    input,
+    label,
+    select,
+    textarea,
+    [role='button'],
+    [role='slider'],
+    [role='switch'],
+    [role='tab'],
+    [data-no-drag] {
+        -webkit-app-region: no-drag;
+    }
+    html {
+        @apply font-sans;
+        /* Geist's default figures are proportional, which makes timecodes and
+           byte counters jitter as they tick. Contextual alternates off, tabular
+           figures on, everywhere. */
+        font-feature-settings:
+            'tnum' 1,
+            'calt' 0;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    /* Thin, unobtrusive scrollbars in place of the platform's chunky ones —
+       Chromium is the only engine here, so the webkit pseudo-elements are the
+       whole story. The gutter is transparent and the thumb only firms up on
+       hover, so a scrollable panel doesn't announce itself with a grey stripe.
+       Panels that need scrollbars floating *over* their content instead of
+       taking layout width use the ScrollArea component. */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
+    ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    ::-webkit-scrollbar-track,
+    ::-webkit-scrollbar-corner {
+        background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+        background-color: var(--scrollbar-thumb);
+        border-radius: 999px;
+        /* Transparent border shrinks the visible thumb to ~4px while keeping a
+           comfortable grab target. */
+        border: 3px solid transparent;
+        background-clip: content-box;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background-color: var(--scrollbar-thumb-hover);
+    }
+    ::-webkit-scrollbar-button {
+        display: none;
+    }
+}
+
+/* Indeterminate progress: a short bar tracking back and forth, so "working on
+   something of unknown length" doesn't look like a stalled full bar. */
+@keyframes progress-sweep {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(300%);
+    }
+}

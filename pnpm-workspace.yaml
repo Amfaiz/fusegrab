@@ -1,0 +1,17 @@
+# Single-package project — this file only carries pnpm settings (no `packages`).
+nodeLinker: hoisted
+blockExoticSubdeps: false
+allowBuilds:
+    electron: true
+    electron-winstaller: true
+    esbuild: true
+    # ffmpeg-static's own install script hard-exits on arm64 (no published
+    # binary), which would abort `pnpm i`. Disabled here; the root postinstall
+    # runs scripts/install-ffmpeg.mjs instead, fetching the x64 build as a
+    # fallback (the runtime remaps arm64 -> x64). See scripts/install-ffmpeg.mjs.
+    ffmpeg-static: false
+    fs-xattr: true
+    macos-alias: true
+    msw: true
+    spawn-sync: true
+    unrs-resolver: true
