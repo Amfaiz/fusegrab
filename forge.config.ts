@@ -58,6 +58,25 @@ const config = {
         // The rounded PNG is shipped so the runtime window/taskbar icon works
         // in packaged builds (see src/main.ts).
         extraResource: ['./assets/icon.rounded.png'],
+        // Codesign the .app with a Developer ID cert and notarize it with
+        // Apple's notary service. Credentials come from the environment at
+        // build time: APPLE_API_KEY (path to the .p8), APPLE_API_KEY_ID,
+        // APPLE_API_ISSUER — see developer.apple.com/account → App Store
+        // Connect API keys.
+        osxSign: {
+            // No `identity`: osx-sign auto-discovers the sole Developer ID
+            // Application cert in the login keychain, so no team ID lives in
+            // the repo.
+            // electron-packager defaults continueOnError to true and silently
+            // continues with an unsigned app when signing fails. Fail loudly.
+            continueOnError: false,
+        },
+        osxNotarize: {
+            tool: 'notarytool',
+            appleApiKey: process.env.APPLE_API_KEY,
+            appleApiKeyId: process.env.APPLE_API_KEY_ID,
+            appleApiIssuer: process.env.APPLE_API_ISSUER,
+        },
         // @electron/packager wraps these hooks in util.promisify, so they must
         // use the callback contract — an async function that never calls back
         // hangs the build.
