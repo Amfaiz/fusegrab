@@ -17,3 +17,4 @@ scratch
 .claude/**/*.lock
 build/ffmpeg-cache
 .pnpm-store
+!out/RELEASE_NOTES.md
