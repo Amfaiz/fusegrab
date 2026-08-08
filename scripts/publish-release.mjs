@@ -120,7 +120,23 @@ if (exists) {
         `FuseGrab ${version}`,
     ]
     if (notesFile) args.push('--notes-file', notesFile)
-    else args.push('--notes', notes ?? `FuseGrab ${version}`)
+    else if (notes) args.push('--notes', notes)
+    else {
+        // No notes given — derive them from git history since the last tag.
+        const gen = spawnSync(
+            process.execPath,
+            [join(ROOT, 'scripts', 'generate-release-notes.mjs')],
+            { cwd: ROOT, stdio: 'inherit' },
+        )
+        if (gen.status === 0) {
+            args.push('--notes-file', join(ROOT, 'out', 'RELEASE_NOTES.md'))
+        } else {
+            console.error(
+                `[publish] note generation failed (exit ${gen.status}), falling back to a bare title`,
+            )
+            args.push('--notes', `FuseGrab ${version}`)
+        }
+    }
     if (draft) args.push('--draft')
     if (prerelease) args.push('--prerelease')
     gh(args)

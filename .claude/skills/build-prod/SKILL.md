@@ -1,6 +1,6 @@
 ---
 name: build-prod
-description: Build production installers for FuseGrab — Windows x64, Windows ARM64 (NSIS setup .exe), and macOS (.dmg). Use when the user wants to build/create/compile production installers, a release build, a setup .exe, or a .dmg, or asks to build for Windows, Windows ARM, or macOS.
+description: Build production installers for FuseGrab — Windows x64, Windows ARM64 (NSIS setup .exe), and macOS (.dmg). Use when the user wants to build/create/compile production installers, a release build, a setup .exe, or a .dmg, or asks to build for Windows, Windows ARM, or macOS, or wants release notes / a changelog for a release.
 ---
 
 # Build production installers for FuseGrab
@@ -130,6 +130,25 @@ roughly 110–120 MB; far smaller means a truncated or partial package.
 Report the artifact paths and sizes, plus anything you skipped and why (e.g. no `.dmg` on a Windows
 host). Call out any arch whose artifact you did **not** verify rather than implying a clean sweep.
 
+## 5. Release notes
+
+```bash
+node scripts/generate-release-notes.mjs   # or: pnpm run notes
+```
+
+Derives the release notes for the current `package.json` version from git history:
+commits since the previous `v*` tag, falling back to the full history when no
+previous tag exists (e.g. a first release). Commits with conventional-commit
+prefixes (`feat:`, `fix:`, `perf:`, …) are grouped into Features / Fixes /
+Performance / etc.; unprefixed messages land in "Changes" when nothing is
+prefixed, otherwise "Other". A `Compare vPrev → vCur` link is appended when a
+previous tag exists and an `origin` remote is configured.
+
+Writes `out/RELEASE_NOTES.md` (gitignored) and prints the result. `--stdout`
+prints without writing. **Review and edit the file before publishing** — it is
+what users see on GitHub. The generated file is what `publish-release.mjs`
+uploads when you don't pass `--notes`/`--notes-file`.
+
 ## Known-benign warnings
 
 Don't chase these; they don't affect output.
@@ -155,9 +174,11 @@ matches the "installs like VS Code" shape — don't rebuild it.
 ## Publishing (only when asked)
 
 `node scripts/publish-release.mjs` creates/updates the `v<version>` GitHub Release on
-`ammarrik/fuse-app`, auto-attaching every `*-Setup-*.exe` and `*.dmg` in `out/make` whose filename
-contains the current version. Requires `gh` installed and authed. Useful flags: `--notes-file <path>`,
-`--draft`, `--prerelease`, `--repo owner/repo`.
+`ammarrik/fusegrab`, auto-attaching every `*-Setup-*.exe` and `*.dmg` in `out/make` whose filename
+contains the current version. Requires `gh` installed and authed. When creating a release with no
+`--notes`/`--notes-file`, it auto-generates notes from git history (see
+[Release notes](#5-release-notes)) and uses `out/RELEASE_NOTES.md` as the body. Useful flags:
+`--notes-file <path>`, `--notes "text"`, `--draft`, `--prerelease`, `--repo owner/repo`.
 
 The in-app updater reads `/releases/latest`, which skips drafts and prereleases, and only offers an
 update when the published version is **higher** than the running one — so bump the version before

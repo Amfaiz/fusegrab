@@ -21,6 +21,7 @@
         "make:all": "node scripts/build-installers.mjs all",
         "make:nsis": "pnpm run package && node scripts/make-nsis.mjs",
         "publish": "node scripts/publish-release.mjs",
+        "notes": "node scripts/generate-release-notes.mjs",
         "release": "pnpm run make:nsis && node scripts/publish-release.mjs",
         "generate-icons": "node scripts/generate-icons.mjs",
         "test": "vitest run --passWithNoTests",
