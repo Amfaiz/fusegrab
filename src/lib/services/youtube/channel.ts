@@ -1,0 +1,437 @@
+import type {
+    ActiveDownloadState,
+    ChannelProgressEvent,
+    DownloadChannelOptions,
+    YoutubeChannelInfo,
+    YoutubeChannelVideoItem,
+} from './types'
+import type { BrowserWindow } from 'electron'
+
+import ffmpegPath from 'ffmpeg-static'
+import { execFile, spawn } from 'node:child_process'
+import { existsSync, mkdirSync } from 'node:fs'
+import path from 'node:path'
+
+import { getSessionLogger } from '../logger/service'
+
+import {
+    ensureFfmpegBinary,
+    ensureYtDlpBinary,
+    getAntiRateLimitArgs,
+    getJsRuntimeArgs,
+    spawnOptions,
+} from './binary'
+import { scrapeChannelWithBrowser } from './channel-scraper'
+import { buildVideoFormatSelector } from './format'
+
+export async function getYoutubeUrlType(
+    url: string,
+): Promise<'video' | 'channel'> {
+    const cleanUrl = url.trim()
+    if (!cleanUrl) {
+        throw new Error('Invalid YouTube URL')
+    }
+
+    if (
+        cleanUrl.includes('/watch?v=') ||
+        cleanUrl.includes('watch?v=') ||
+        cleanUrl.includes('v=') ||
+        cleanUrl.includes('youtu.be/') ||
+        cleanUrl.includes('/shorts/')
+    ) {
+        return 'video'
+    }
+
+    if (
+        cleanUrl.includes('/@') ||
+        cleanUrl.includes('/channel/') ||
+        cleanUrl.includes('/c/') ||
+        cleanUrl.includes('/user/') ||
+        cleanUrl.includes('list=')
+    ) {
+        return 'channel'
+    }
+
+    const ytDlpPath = await ensureYtDlpBinary()
+    try {
+        const antiRateLimitArgs = await getAntiRateLimitArgs()
+        const jsRuntimeArgs = await getJsRuntimeArgs()
+        const stdout = await new Promise<string>((resolve, reject) => {
+            execFile(
+                ytDlpPath,
+                [
+                    ...antiRateLimitArgs,
+                    ...jsRuntimeArgs,
+                    '--dump-single-json',
+                    '--flat-playlist',
+                    '--playlist-start',
+                    '1',
+                    '--playlist-end',
+                    '1',
+                    cleanUrl,
+                ],
+                { maxBuffer: 50 * 1024 * 1024 },
+                (err, out) => {
+                    if (err) return reject(err)
+                    resolve(out)
+                },
+            )
+        })
+
+        const data = JSON.parse(stdout)
+        if (
+            data._type === 'playlist' ||
+            Array.isArray(data.entries) ||
+            data.playlist_count
+        ) {
+            return 'channel'
+        }
+    } catch {}
+
+    return 'video'
+}
+
+export async function getYoutubeChannelPage(
+    win: BrowserWindow | null,
+    url: string,
+    page = 1,
+    limit = 10000,
+): Promise<YoutubeChannelInfo> {
+    const cleanUrl = url.trim()
+    if (!cleanUrl) {
+        throw new Error('Invalid YouTube channel URL')
+    }
+
+    const skipCount = (page - 1) * limit
+    const targetNeeded = 10000
+
+    const result = await scrapeChannelWithBrowser(
+        cleanUrl,
+        targetNeeded,
+        (batch) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('youtube:channel-video-batch', batch)
+            }
+        },
+    )
+
+    if (result && result.videos.length > 0) {
+        const pageVideos = result.videos.slice(skipCount, skipCount + limit)
+        return {
+            id: cleanUrl,
+            title: result.channelTitle || 'YouTube Channel',
+            author: result.channelTitle || 'YouTube',
+            totalVideos: result.videos.length,
+            videos: pageVideos,
+            hasMore: result.hasMore,
+            nextPage: page + 1,
+        }
+    }
+
+    const fallback = await getChannelPageViaYtDlp(cleanUrl, page, 10000)
+    if (win && !win.isDestroyed() && fallback.videos.length > 0) {
+        win.webContents.send('youtube:channel-video-batch', {
+            channelUrl: cleanUrl,
+            channelTitle: fallback.title || 'YouTube Playlist',
+            videos: fallback.videos,
+            isFirstBatch: true,
+            isDone: true,
+        })
+    }
+    return fallback
+}
+
+async function getChannelPageViaYtDlp(
+    url: string,
+    page: number,
+    limit: number,
+): Promise<YoutubeChannelInfo> {
+    const ytDlpPath = await ensureYtDlpBinary()
+    const start = (page - 1) * limit + 1
+    const end = page * limit
+
+    const antiRateLimitArgs = await getAntiRateLimitArgs()
+    const jsRuntimeArgs = await getJsRuntimeArgs()
+    const stdout = await new Promise<string>((resolve, reject) => {
+        execFile(
+            ytDlpPath,
+            [
+                ...antiRateLimitArgs,
+                ...jsRuntimeArgs,
+                '--dump-single-json',
+                '--flat-playlist',
+                '--playlist-start',
+                String(start),
+                '--playlist-end',
+                String(end),
+                url,
+            ],
+            { maxBuffer: 50 * 1024 * 1024 },
+            (err, out) => {
+                if (err)
+                    return reject(
+                        new Error(
+                            err.message ||
+                                'Failed to fetch YouTube channel info',
+                        ),
+                    )
+                resolve(out)
+            },
+        )
+    })
+
+    const data = JSON.parse(stdout)
+    const rawEntries = Array.isArray(data.entries) ? data.entries : []
+    const totalVideos =
+        data.playlist_count || data.n_entries || rawEntries.length
+
+    const videos: YoutubeChannelVideoItem[] = rawEntries.map((e: any) => {
+        const videoId = e.id || e.url?.replace(/.*v=/, '') || ''
+        let thumb = ''
+        if (Array.isArray(e.thumbnails) && e.thumbnails.length > 0) {
+            thumb = e.thumbnails[e.thumbnails.length - 1].url
+        } else if (videoId) {
+            thumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+        }
+
+        const videoUrl = e.url
+            ? e.url.startsWith('http')
+                ? e.url
+                : `https://www.youtube.com/watch?v=${e.url}`
+            : `https://www.youtube.com/watch?v=${videoId}`
+
+        return {
+            id: videoId,
+            title: e.title || 'Untitled Video',
+            url: videoUrl,
+            thumbnail: thumb,
+            durationSeconds: Math.round(e.duration || 0),
+            author:
+                e.uploader ||
+                e.channel ||
+                data.uploader ||
+                data.channel ||
+                data.title ||
+                'YouTube',
+        }
+    })
+
+    const hasMore = rawEntries.length >= limit || totalVideos > end
+
+    return {
+        id: data.id || url,
+        title: data.title || data.uploader || 'YouTube Channel',
+        author: data.uploader || data.channel || 'YouTube',
+        totalVideos: totalVideos || videos.length,
+        videos,
+        hasMore,
+        nextPage: page + 1,
+    }
+}
+
+export async function downloadYoutubeChannel(
+    win: BrowserWindow | null,
+    options: DownloadChannelOptions,
+    onProcessStart: (proc: any) => void,
+    onProcessEnd: () => void,
+    updateState: (patch: Partial<ActiveDownloadState>) => void,
+    startPower: () => void,
+    stopPower: () => void,
+): Promise<void> {
+    const { channelUrl, saveDir, qualityHeight, isAudioOnly, rootDownloadDir } =
+        options
+    const logDir = rootDownloadDir || path.dirname(saveDir)
+    const logger = getSessionLogger()
+    logger.setDownloadRoot(logDir)
+
+    const downloadLabel = `Channel/Playlist Download — ${path.basename(saveDir)}`
+    logger.startDownload(downloadLabel, {
+        channelUrl,
+        saveDir,
+        qualityHeight,
+        isAudioOnly,
+    })
+
+    const cleanUrl = channelUrl.trim()
+    if (!existsSync(saveDir)) {
+        logger.info(`Creating target save directory: ${saveDir}`)
+        mkdirSync(saveDir, { recursive: true })
+    }
+
+    logger.info('Step 1/3: Resolving yt-dlp binary...')
+    const ytDlpPath = await ensureYtDlpBinary(false, logger)
+    logger.info(`yt-dlp binary located at: ${ytDlpPath}`)
+
+    logger.info('Step 2/3: Fetching anti-rate-limit parameters...')
+    const antiRateLimitArgs = await getAntiRateLimitArgs(win, logger)
+    logger.info(
+        `Anti-rate-limit arguments: ${JSON.stringify(antiRateLimitArgs)}`,
+    )
+
+    const resolvedFfmpegPath = await ensureFfmpegBinary(ffmpegPath, logger)
+    const canMerge = Boolean(resolvedFfmpegPath)
+
+    const args: string[] = [
+        ...antiRateLimitArgs,
+        ...(await getJsRuntimeArgs(logger)),
+        '--newline',
+        '--no-mtime',
+        '--sleep-requests',
+        '1',
+        '--sleep-interval',
+        '2',
+        '--max-sleep-interval',
+        '5',
+    ]
+
+    if (resolvedFfmpegPath) {
+        args.push('--ffmpeg-location', resolvedFfmpegPath)
+        // Only meaningful with ffmpeg present; without it yt-dlp cannot mux.
+        args.push('--merge-output-format', 'mp4')
+        logger.info(`ffmpeg binary located at: ${resolvedFfmpegPath}`)
+    } else {
+        logger.warn(
+            'ffmpeg binary not found. Falling back to a single pre-merged format; quality may be lower than requested.',
+        )
+    }
+
+    if (isAudioOnly) {
+        args.push('-f', 'bestaudio')
+        if (canMerge) {
+            // Transcoding to mp3 is an ffmpeg postprocessor.
+            args.push('-x', '--audio-format', 'mp3')
+        }
+    } else if (qualityHeight) {
+        args.push('-f', buildVideoFormatSelector(qualityHeight, canMerge))
+    } else {
+        args.push('-f', buildVideoFormatSelector(undefined, canMerge))
+    }
+
+    const outputTemplate = path.join(saveDir, '%(title)s [%(id)s].%(ext)s')
+    args.push('-o', outputTemplate, cleanUrl)
+
+    logger.info(
+        `Step 3/3: Spawning yt-dlp process with output template: ${outputTemplate}`,
+    )
+    logger.info(`Full yt-dlp arguments: ${args.join(' ')}`)
+
+    startPower()
+    updateState({
+        isDownloading: true,
+        downloadType: 'channel',
+        url: cleanUrl,
+        progress: null,
+        channelProgress: {
+            currentItem: 0,
+            totalItems: 0,
+            percent: 0,
+            status: 'downloading',
+        },
+    })
+
+    const proc = spawn(ytDlpPath, args, spawnOptions())
+    onProcessStart(proc)
+    logger.info(`yt-dlp child process spawned with PID ${proc.pid}`)
+
+    let currentItem = 0
+    let totalItems = 0
+    let videoTitle = ''
+    const stderrLines: string[] = []
+
+    return new Promise((resolve, reject) => {
+        proc.stdout.on('data', (data: Buffer) => {
+            const lines = data.toString().split('\n')
+            for (const line of lines) {
+                logger.logStdoutLine(line)
+
+                const itemMatch = line.match(
+                    /\[download\]\s+Downloading\s+(?:item|video)\s+(\d+)\s+of\s+(\d+)/i,
+                )
+                if (itemMatch) {
+                    currentItem = parseInt(itemMatch[1], 10)
+                    totalItems = parseInt(itemMatch[2], 10)
+                    logger.info(
+                        `Downloading item ${currentItem} of ${totalItems}`,
+                    )
+                }
+
+                const destMatch = line.match(
+                    /\[download\]\s+Destination:\s+(.+)/i,
+                )
+                if (destMatch) {
+                    videoTitle = path.basename(destMatch[1])
+                    logger.info(`Target destination: ${videoTitle}`)
+                }
+
+                const ytDlpPercent = line.match(/\[download\]\s+([\d.]+)%/)
+                const aria2Percent =
+                    line.match(/\[#\w+.*?\(([\d.]+)%\)/) ||
+                    line.match(/\[#\w+.*?\s+([\d.]+)%/)
+                const percentMatch = ytDlpPercent || aria2Percent
+
+                if (percentMatch) {
+                    const percent = parseFloat(percentMatch[1])
+                    if (!isNaN(percent)) {
+                        const cp: ChannelProgressEvent = {
+                            currentItem,
+                            totalItems,
+                            percent: Math.min(100, percent),
+                            videoTitle,
+                            status: 'downloading',
+                        }
+                        updateState({ channelProgress: cp })
+                        if (win && !win.isDestroyed()) {
+                            win.webContents.send('youtube:channel-progress', cp)
+                        }
+                    }
+                }
+            }
+        })
+
+        proc.stderr.on('data', (data: Buffer) => {
+            const str = data.toString()
+            logger.logStderrLine(str)
+            if (!str.includes('WARNING:')) {
+                stderrLines.push(str.trim())
+            }
+        })
+
+        proc.on('error', async (err) => {
+            stopPower()
+            onProcessEnd()
+            updateState({ isDownloading: false })
+            logger.error('yt-dlp channel process encountered error', err)
+            logger.endDownload(downloadLabel, false)
+            reject(err)
+        })
+
+        proc.on('close', async (code) => {
+            stopPower()
+            onProcessEnd()
+            updateState({ isDownloading: false })
+            logger.info(`yt-dlp process exited with code ${code}`)
+            if (code === 0) {
+                logger.info('Channel download successfully completed.')
+                logger.endDownload(downloadLabel, true)
+                if (win && !win.isDestroyed()) {
+                    win.webContents.send('youtube:channel-progress', {
+                        currentItem: totalItems || currentItem,
+                        totalItems: totalItems || currentItem,
+                        percent: 100,
+                        videoTitle,
+                        status: 'completed',
+                    } satisfies ChannelProgressEvent)
+                }
+                resolve()
+            } else {
+                const errMsg =
+                    stderrLines.length > 0
+                        ? stderrLines.slice(-3).join(' ')
+                        : `Channel download exited with code ${code}`
+                logger.error(`Channel download failed: ${errMsg}`)
+                logger.endDownload(downloadLabel, false)
+                reject(new Error(errMsg))
+            }
+        })
+    })
+}
