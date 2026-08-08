@@ -15,7 +15,31 @@ const isForgeCli = process.argv.some((arg) => /electron-forge/.test(arg))
 
 if (isForgeCli) {
     const timer = setInterval(() => {}, 1000)
-    // Release the timer once forge signals it is done, so the process can exit
-    // on its own instead of hanging for the caller to kill it.
+
+    // Forge's make CLI never calls process.exit(): once api.make() resolves,
+    // this interval is the only thing keeping the event loop alive, and the
+    // process hangs forever (blocking the next arch in build-installers.mjs).
+    // Release the timer the moment forge prints its final completion line so
+    // the process exits naturally.
+    let finished = false
+    const finish = () => {
+        if (finished) return
+        finished = true
+        clearInterval(timer)
+        process.stdout.write = origStdout
+        process.stderr.write = origStderr
+    }
+    const origStdout = process.stdout.write.bind(process.stdout)
+    const origStderr = process.stderr.write.bind(process.stderr)
+    const watch = (orig, chunk, ...rest) => {
+        if (!finished && chunk.toString().includes('Artifacts available at:')) {
+            queueMicrotask(finish)
+        }
+        return orig(chunk, ...rest)
+    }
+    process.stdout.write = watch.bind(null, origStdout)
+    process.stderr.write = watch.bind(null, origStderr)
+
+    // Belt and suspenders: if the process exits some other way, drop the timer.
     process.on('exit', () => clearInterval(timer))
 }
