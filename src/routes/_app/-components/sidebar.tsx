@@ -3,11 +3,11 @@ import type { DownloadItem } from './types'
 import { useState } from 'react'
 
 import {
-    Anonymous,
     Folder,
     FolderOpen,
     Globe,
     Logout,
+    UserCircle,
     Video,
     Whatsapp,
     Youtube,
@@ -48,6 +48,36 @@ interface AccountSectionProps {
 }
 
 /**
+ * Google avatar that falls back to the anonymous icon when the image is
+ * missing or fails to load. Remount with a `key` to reset the failed state
+ * when the avatar URL changes.
+ */
+function Avatar({
+    src,
+    imgClassName,
+    iconClassName,
+}: {
+    src: string | null
+    imgClassName: string
+    iconClassName: string
+}) {
+    const [failed, setFailed] = useState(false)
+
+    if (!src || failed) {
+        return <UserCircle className={iconClassName} />
+    }
+
+    return (
+        <img
+            src={src}
+            alt=""
+            className={imgClassName}
+            onError={() => setFailed(true)}
+        />
+    )
+}
+
+/**
  * A single compact sign-in row. Anonymous shows a "Sign in to YouTube"
  * button; signed in, it becomes an account button (avatar + name) opening a
  * dropdown with the account details, a switch-account item, and Log out.
@@ -74,15 +104,12 @@ function AccountSection({
     return (
         <Menu>
             <MenuTrigger className="hover:bg-muted text-foreground/80 hover:text-foreground flex w-full items-center gap-1.5 rounded-md p-1.75 text-xs transition-colors outline-none">
-                {accountInfo?.avatarUrl ? (
-                    <img
-                        src={accountInfo.avatarUrl}
-                        alt=""
-                        className="size-4 shrink-0 rounded-full"
-                    />
-                ) : (
-                    <Anonymous className="text-primary size-3.5 shrink-0" />
-                )}
+                <Avatar
+                    key={accountInfo?.avatarUrl}
+                    src={accountInfo?.avatarUrl ?? null}
+                    imgClassName="size-4 shrink-0 rounded-full"
+                    iconClassName="text-primary size-3.5 shrink-0"
+                />
                 <span className="truncate">
                     {accountInfo?.name || 'Anonymous'}
                 </span>
@@ -91,13 +118,12 @@ function AccountSection({
                 {accountInfo && (
                     <>
                         <div className="flex items-center gap-2.5 px-2.5 py-2">
-                            {accountInfo.avatarUrl && (
-                                <img
-                                    src={accountInfo.avatarUrl}
-                                    alt=""
-                                    className="size-8 shrink-0 rounded-full"
-                                />
-                            )}
+                            <Avatar
+                                key={accountInfo.avatarUrl}
+                                src={accountInfo.avatarUrl}
+                                imgClassName="size-8 shrink-0 rounded-full"
+                                iconClassName="text-primary size-8 shrink-0"
+                            />
                             <div className="min-w-0">
                                 <p className="truncate text-xs font-medium">
                                     {accountInfo.name}
