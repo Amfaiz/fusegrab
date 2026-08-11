@@ -188,7 +188,9 @@ export async function fetchFfmpeg(platform, arch, log = console.log) {
             return cached
         } catch (err) {
             const message = err?.message || String(err)
-            log(`ffmpeg (${platform}-${arch}): ${source.url} failed — ${message}`)
+            log(
+                `ffmpeg (${platform}-${arch}): ${source.url} failed — ${message}`,
+            )
             errors.push(`${source.url}: ${message}`)
         }
     }
@@ -199,7 +201,10 @@ export async function fetchFfmpeg(platform, arch, log = console.log) {
 }
 
 // Direct invocation: node scripts/fetch-ffmpeg.mjs [platform] [arch]
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (
+    process.argv[1] &&
+    fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+) {
     const platform = process.argv[2] || process.platform
     const arch = process.argv[3] || process.arch
     fetchFfmpeg(platform, arch).catch((err) => {

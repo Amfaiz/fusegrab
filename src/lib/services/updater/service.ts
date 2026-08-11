@@ -109,7 +109,10 @@ export async function checkForUpdate(): Promise<UpdateState> {
             // 403 with no quota headers is GitHub rate-limiting unauthenticated
             // requests; the repo being private or gone also 403s (and 404s are
             // handled above as "no update available").
-            if (res.status === 403 && !res.headers.has('x-ratelimit-remaining')) {
+            if (
+                res.status === 403 &&
+                !res.headers.has('x-ratelimit-remaining')
+            ) {
                 throw new Error(
                     'Update service is busy right now. Try again in a few minutes.',
                 )
@@ -141,11 +144,7 @@ export async function checkForUpdate(): Promise<UpdateState> {
             return state
         }
 
-        const match = pickAsset(
-            release.assets,
-            process.platform,
-            process.arch,
-        )
+        const match = pickAsset(release.assets, process.platform, process.arch)
         if (!match) {
             clearSelectedAsset()
             setState({

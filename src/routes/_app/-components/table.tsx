@@ -7,6 +7,7 @@ import {
     Download,
     Folder,
     FolderOpen,
+    Youtube,
     MoreHorizontal,
     Pause,
     Play,
@@ -31,6 +32,7 @@ import {
     SelectValue,
 } from '#/components/ui/select'
 
+import { isBotCheckError } from './retry'
 import { getStatusText } from './types'
 
 /**
@@ -83,6 +85,7 @@ interface DownloaderTableProps {
     onStopItem: (id: string) => void
     onDeleteItem?: (id: string) => void
     onOpenFolder?: (item: DownloadItem) => void
+    onSignIn?: () => void
     isFetchingVideos?: boolean
 }
 
@@ -98,6 +101,7 @@ export function DownloaderTable({
     onStopItem,
     onDeleteItem,
     onOpenFolder,
+    onSignIn,
     isFetchingVideos,
 }: DownloaderTableProps) {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -476,6 +480,24 @@ export function DownloaderTable({
                                                         <span>Download</span>
                                                     </MenuItem>
                                                 )}
+                                                {item.statusStage &&
+                                                isBotCheckError(
+                                                    item.statusStage,
+                                                ) &&
+                                                onSignIn ? (
+                                                    <>
+                                                        <MenuSeparator />
+                                                        <MenuItem
+                                                            onClick={onSignIn}
+                                                        >
+                                                            <Youtube className="text-primary h-3.5 w-3.5" />
+                                                            <span>
+                                                                Sign in to
+                                                                YouTube
+                                                            </span>
+                                                        </MenuItem>
+                                                    </>
+                                                ) : null}
                                                 <MenuSeparator />
                                                 <MenuItem
                                                     onClick={() => {

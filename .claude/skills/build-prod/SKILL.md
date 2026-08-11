@@ -7,11 +7,11 @@ description: Build production installers for FuseGrab — Windows x64, Windows A
 
 Produces the shippable installers from the repo root (`fusegrab`, an Electron + Vite app):
 
-| Target | Artifact | Buildable on |
-| --- | --- | --- |
-| Windows x64 | `out/make/FuseGrab-Setup-<version>-x64.exe` | Windows only |
-| Windows ARM64 | `out/make/FuseGrab-Setup-<version>-arm64.exe` | Windows only |
-| macOS (arm64 + x64) | `out/make/FuseGrab-<version>-<arch>.dmg` | macOS only |
+| Target              | Artifact                                      | Buildable on |
+| ------------------- | --------------------------------------------- | ------------ |
+| Windows x64         | `out/make/FuseGrab-Setup-<version>-x64.exe`   | Windows only |
+| Windows ARM64       | `out/make/FuseGrab-Setup-<version>-arm64.exe` | Windows only |
+| macOS (arm64 + x64) | `out/make/FuseGrab-<version>-<arch>.dmg`      | macOS only   |
 
 Both Windows arches cross-build from a single Windows host (either arch). macOS **cannot** be
 cross-built from Windows — [scripts/build-installers.mjs](scripts/build-installers.mjs) skips the

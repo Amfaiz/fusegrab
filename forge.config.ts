@@ -3,6 +3,8 @@ import { copyFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 
 // @ts-ignore - mjs has no declaration file
+import { fetchDeno, getDenoBinaryName } from './scripts/fetch-deno.mjs'
+// @ts-ignore - mjs has no declaration file
 import { fetchFfmpeg, getBinaryName } from './scripts/fetch-ffmpeg.mjs'
 
 /**
@@ -31,6 +33,21 @@ async function bundleFfmpeg(
     const dest = path.join(ffmpegDir, getBinaryName(platform))
     await copyFile(cached, dest)
     console.log(`Bundled ffmpeg for ${platform}-${arch}: ${dest}`)
+}
+
+async function bundleDeno(
+    buildPath: string,
+    platform: string,
+    arch: string,
+): Promise<void> {
+    const resourcesDir = path.resolve(buildPath, '..')
+    const denoDir = path.join(resourcesDir, 'deno')
+    await mkdir(denoDir, { recursive: true })
+
+    const cached = await fetchDeno(platform, arch, console.log)
+    const dest = path.join(denoDir, getDenoBinaryName(platform))
+    await copyFile(cached, dest)
+    console.log(`Bundled deno for ${platform}-${arch}: ${dest}`)
 }
 
 const config = {
@@ -88,7 +105,10 @@ const config = {
                 arch: string,
                 callback: (err?: Error | null) => void,
             ) => {
-                bundleFfmpeg(buildPath, platform, arch).then(
+                Promise.all([
+                    bundleFfmpeg(buildPath, platform, arch),
+                    bundleDeno(buildPath, platform, arch),
+                ]).then(
                     () => callback(),
                     (err) => callback(err),
                 )

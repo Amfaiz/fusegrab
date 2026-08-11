@@ -113,7 +113,9 @@ function runMakeNsis(arch) {
         return false
     }
     if (result.status !== 0) {
-        console.warn(`[build-installers] Warning: NSIS build for ${arch} failed.`)
+        console.warn(
+            `[build-installers] Warning: NSIS build for ${arch} failed.`,
+        )
         return false
     }
     return true
@@ -167,7 +169,10 @@ if (existsSync(makeDir)) {
             if (stat && stat.isDirectory()) {
                 results = results.concat(getFilesRecursively(fullPath))
             } else {
-                results.push({ path: fullPath, sizeMB: (stat.size / (1024 * 1024)).toFixed(2) })
+                results.push({
+                    path: fullPath,
+                    sizeMB: (stat.size / (1024 * 1024)).toFixed(2),
+                })
             }
         }
         return results

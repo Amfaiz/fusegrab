@@ -1,4 +1,4 @@
-import { Loader2, Search, X } from '#/components/icons'
+import { Youtube, Loader2, Search, X } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import {
     Dialog,
@@ -13,6 +13,8 @@ import {
 } from '#/components/ui/dialog'
 import { InputField, InputIcon, InputRoot } from '#/components/ui/input'
 
+import { isBotCheckError } from './retry'
+
 interface AddUrlModalProps {
     open: boolean
     onOpenChange: (open: boolean) => void
@@ -21,6 +23,8 @@ interface AddUrlModalProps {
     loadingInfo: boolean
     error: string | null
     onSubmit: () => void
+    signInStatus?: 'idle' | 'opened' | 'signed-in' | 'closed' | 'signed-out'
+    onSignIn?: () => void
 }
 
 export function AddUrlModal({
@@ -31,6 +35,8 @@ export function AddUrlModal({
     loadingInfo,
     error,
     onSubmit,
+    signInStatus = 'idle',
+    onSignIn,
 }: AddUrlModalProps) {
     return (
         <Dialog
@@ -66,7 +72,8 @@ export function AddUrlModal({
                     </DialogHeader>
 
                     <DialogDescription>
-                        Enter a YouTube video, playlist, or channel URL to download.
+                        Enter a YouTube video, playlist, or channel URL to
+                        download.
                     </DialogDescription>
 
                     <DialogBody>
@@ -83,7 +90,29 @@ export function AddUrlModal({
                             />
                         </InputRoot>
                         {error && (
-                            <p className="text-danger text-xs">{error}</p>
+                            <div className="space-y-2">
+                                <p className="text-danger text-xs">{error}</p>
+                                {isBotCheckError(error) && onSignIn && (
+                                    <Button
+                                        type="button"
+                                        variant="default"
+                                        size="sm"
+                                        block
+                                        disabled={
+                                            signInStatus === 'opened' ||
+                                            signInStatus === 'signed-in'
+                                        }
+                                        onClick={onSignIn}
+                                    >
+                                        <Youtube />
+                                        {signInStatus === 'opened'
+                                            ? 'Signing in… finish in your browser'
+                                            : signInStatus === 'signed-in'
+                                              ? 'Signed in — press Continue to retry'
+                                              : 'Sign in to YouTube once (in your browser)'}
+                                    </Button>
+                                )}
+                            </div>
                         )}
                     </DialogBody>
 

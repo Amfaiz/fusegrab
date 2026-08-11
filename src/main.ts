@@ -42,7 +42,16 @@ import {
     getYoutubeChannelPage,
     getYoutubeUrlType,
     getYoutubeVideoInfo,
+    prewarmYoutubeBinaries,
 } from './lib/services/youtube/service'
+import {
+    cancelYoutubeSignIn,
+    getYoutubeAccountInfo,
+    isYoutubeSignedIn,
+    openYoutubeSignIn,
+    signOutYoutube,
+    stopSignInPolling,
+} from './lib/services/youtube/sign-in'
 
 // electron-squirrel-startup is CommonJS. Importing it with a normal ESM `import`
 // makes Node run its CJS-interop preparse at link time, which crashes the whole
@@ -114,6 +123,7 @@ const getVisibleWindows = () =>
 function shutdownSession() {
     cancelYoutubeDownload()
     destroyScraperWindows()
+    stopSignInPolling()
 }
 
 const createWindow = () => {
@@ -127,6 +137,9 @@ const createWindow = () => {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            // The sign-in flow runs in an embedded <webview> (stock Chromium
+            // fingerprint, see sign-in.ts) instead of a real browser.
+            webviewTag: true,
             // Fully disable DevTools in packaged builds. This blocks
             // openDevTools(), the menu accelerator, and the built-in
             // F12 / Ctrl+Shift+I / Cmd+Opt+I shortcuts. Kept on in dev.
@@ -223,6 +236,15 @@ app.on('ready', async () => {
             console.error('Update check failed:', err)
         })
     }, 4000)
+
+    // Pre-warm yt-dlp/aria2/deno in the background so the first paste or
+    // download never blocks on a binary fetch. yt-dlp is version-checked here
+    // on every startup — not just the 24h window — so YouTube-side breakage
+    // heals the moment the app launches. Deno is bundled in the installer, so
+    // that part is a no-op in packaged builds.
+    setTimeout(() => {
+        void prewarmYoutubeBinaries(logger)
+    }, 1000)
 })
 
 // A cancelled or crashed export can leave a file handle open; make sure they're
@@ -342,7 +364,9 @@ handle('updater:download', () => downloadUpdate())
 handle('updater:install', () => quitAndInstall())
 handle('app:get-version', () => app.getVersion())
 
-handle('youtube:get-info', (_event, url: string) => getYoutubeVideoInfo(url))
+handle('youtube:get-info', (event, url: string) =>
+    getYoutubeVideoInfo(url, BrowserWindow.fromWebContents(event.sender)),
+)
 handle('youtube:get-url-type', (_event, url: string) => getYoutubeUrlType(url))
 handle(
     'youtube:get-channel-page',
@@ -364,6 +388,15 @@ handle('youtube:download-channel', (event, options) =>
     ),
 )
 handle('youtube:cancel-download', () => cancelYoutubeDownload())
+
+// Sign-in: Google blocks login from embedded Chromium (even with a
+// self-consistent fingerprint), so sign-in happens in the user's real browser
+// and the app imports the session cookies into its yt-dlp jar.
+handle('youtube:open-sign-in', () => openYoutubeSignIn())
+handle('youtube:cancel-sign-in', () => cancelYoutubeSignIn())
+handle('youtube:get-sign-in-state', () => isYoutubeSignedIn())
+handle('youtube:get-account-info', () => getYoutubeAccountInfo())
+handle('youtube:sign-out', () => signOutYoutube())
 
 // Renderer state that must outlive a force quit. localStorage alone loses the
 // last writes when the process is killed, so the table is mirrored here.

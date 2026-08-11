@@ -258,7 +258,11 @@ export class SessionLogger {
             }
         }
 
-        if (!this.hasError && this.logFilePath && existsSync(this.logFilePath)) {
+        if (
+            !this.hasError &&
+            this.logFilePath &&
+            existsSync(this.logFilePath)
+        ) {
             try {
                 unlinkSync(this.logFilePath)
             } catch (e) {

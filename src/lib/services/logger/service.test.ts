@@ -17,7 +17,10 @@ describe('SessionLogger', () => {
     let downloadDir: string
 
     beforeEach(async () => {
-        const base = path.join(os.tmpdir(), `fusegrab_test_logger_${Date.now()}`)
+        const base = path.join(
+            os.tmpdir(),
+            `fusegrab_test_logger_${Date.now()}`,
+        )
         logsDir = path.join(base, 'logs')
         downloadDir = path.join(base, 'Downloads')
         await mkdir(downloadDir, { recursive: true })
@@ -158,7 +161,10 @@ describe('SessionLogger', () => {
         mkdirSync(logsDir, { recursive: true })
         // 12 stale error logs from previous sessions
         for (let i = 0; i < 12; i++) {
-            const p = path.join(logsDir, `session-2026-01-0${i % 10}-old${i}.log`)
+            const p = path.join(
+                logsDir,
+                `session-2026-01-0${i % 10}-old${i}.log`,
+            )
             writeFileSync(p, 'stale\n', { flag: 'w' })
         }
         expect(sessionLogs()).toHaveLength(12)

@@ -2,7 +2,11 @@ import type { DownloadItem } from './types'
 
 import { describe, expect, it } from 'vitest'
 
-import { applyDownloadFailure, selectNextDownload } from './retry'
+import {
+    applyDownloadFailure,
+    isBotCheckError,
+    selectNextDownload,
+} from './retry'
 import { MAX_RETRY_ATTEMPTS } from './types'
 
 function makeItem(
@@ -23,6 +27,22 @@ function makeItem(
         ...overrides,
     }
 }
+
+describe('isBotCheckError', () => {
+    it('matches the YouTube bot wall message', () => {
+        expect(
+            isBotCheckError(
+                "ERROR: [youtube] abc: Sign in to confirm you're not a bot.",
+            ),
+        ).toBe(true)
+    })
+
+    it('ignores unrelated failures', () => {
+        expect(isBotCheckError('Video unavailable')).toBe(false)
+        expect(isBotCheckError('HTTP 429: Too Many Requests')).toBe(false)
+        expect(isBotCheckError('')).toBe(false)
+    })
+})
 
 describe('applyDownloadFailure', () => {
     it('defers a first failure to Retry rather than Error', () => {
