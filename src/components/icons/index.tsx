@@ -8,8 +8,10 @@ import {
     Download04Icon,
     Folder01Icon,
     Folder03Icon,
+    Globe02Icon,
     LinkSquare02Icon,
     Loading03Icon,
+    Logout01Icon,
     MoreHorizontalSquareIcon,
     PauseIcon,
     PlayIcon,
@@ -19,6 +21,8 @@ import {
     Settings01Icon,
     Tick02Icon,
     Video02Icon,
+    WhatsappIcon,
+    YoutubeIcon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 
@@ -38,9 +42,13 @@ export const ChevronDownIcon = makeIcon(ArrowDown01Icon)
 export const Download = makeIcon(Download04Icon)
 export const ExternalLink = makeIcon(LinkSquare02Icon)
 export const Video = makeIcon(Video02Icon)
+export const Whatsapp = makeIcon(WhatsappIcon)
 export const Folder = makeIcon(Folder01Icon)
 export const FolderOpen = makeIcon(Folder03Icon)
+export const Globe = makeIcon(Globe02Icon)
+export const Youtube = makeIcon(YoutubeIcon)
 export const Loader2 = makeIcon(Loading03Icon)
+export const Logout = makeIcon(Logout01Icon)
 export const Minus = makeIcon(Remove01Icon)
 export const MoreHorizontal = makeIcon(MoreHorizontalSquareIcon)
 export const Pause = makeIcon(PauseIcon)

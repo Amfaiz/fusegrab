@@ -51,9 +51,7 @@ const ALL_PREFIXES = [
     'chore',
     'style',
 ]
-const PREFIX_RE = new RegExp(
-    `^(${ALL_PREFIXES.join('|')})(\\([^)]*\\))?:\\s*`,
-)
+const PREFIX_RE = new RegExp(`^(${ALL_PREFIXES.join('|')})(\\([^)]*\\))?:\\s*`)
 
 // Previous release: highest `v*` tag that isn't the current one.
 const prevTag = git(['tag', '--list', 'v*', '--sort=-v:refname'])
@@ -90,7 +88,7 @@ for (const commit of commits) {
     }
 }
 
-const lines = ['## What\'s new', '']
+const lines = ["## What's new", '']
 
 if (commits.length === 0) {
     lines.push(
@@ -100,7 +98,10 @@ if (commits.length === 0) {
     )
 } else {
     if (!prevTag) {
-        lines.push('No previous release tag found — listing the full commit history.', '')
+        lines.push(
+            'No previous release tag found — listing the full commit history.',
+            '',
+        )
     }
     if (!sawConventional) {
         lines.push('### Changes')
@@ -121,7 +122,9 @@ if (commits.length === 0) {
 
     if (prevTag) {
         const origin = git(['config', '--get', 'remote.origin.url']).trim()
-        const m = origin.match(/^(?:https?:\/\/|git@)([^/:]+)[:/]([^/]+\/[^/]+?)(?:\.git)?$/)
+        const m = origin.match(
+            /^(?:https?:\/\/|git@)([^/:]+)[:/]([^/]+\/[^/]+?)(?:\.git)?$/,
+        )
         if (m) {
             lines.push(
                 `[Compare ${prevTag} → ${tag}](https://${m[1]}/${m[2]}/compare/${prevTag}...${tag})`,

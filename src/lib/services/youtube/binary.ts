@@ -2,7 +2,7 @@ import type { SessionLogger } from '../logger/service'
 import type { BrowserWindow } from 'electron'
 
 import { app } from 'electron'
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import {
     createWriteStream,
     existsSync,
@@ -13,6 +13,7 @@ import {
     writeFileSync,
 } from 'node:fs'
 import { chmod, rename, rm } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { gunzipSync } from 'node:zlib'
 
@@ -48,58 +49,90 @@ function getBinaryName(): string {
 }
 
 function getDownloadUrl(): string {
+    // The single-file macos asset (yt-dlp_macos) is a PyInstaller onefile
+    // build that re-extracts ~38MB to a temp dir on every launch (~17s per
+    // invocation). The onedir zip (yt-dlp_macos.zip) starts in ~0.2s. The zip
+    // contains the binary plus its _internal/ directory.
+    if (process.platform === 'darwin') {
+        return 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos.zip'
+    }
     const name = getBinaryName()
     return `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${name}`
 }
 
-export async function ensureYtDlpBinary(
-    forceUpdate = false,
+let pendingYtDlpDownload: Promise<string> | null = null
+
+/**
+ * True when GitHub's latest yt-dlp release differs from the installed one.
+ * A null latest (GitHub unreachable) keeps the existing binary; a null local
+ * (binary can't report a version) redownloads.
+ */
+export function ytDlpVersionNeedsUpdate(
+    localVersion: string | null,
+    latestVersion: string | null,
+): boolean {
+    if (latestVersion === null) return false
+    if (localVersion === null) return true
+    return localVersion.trim() !== latestVersion.trim()
+}
+
+async function getLocalYtDlpVersion(binPath: string): Promise<string | null> {
+    try {
+        const stdout = await new Promise<string>((resolve, reject) => {
+            execFile(binPath, ['--version'], NO_WINDOW, (err, out) => {
+                if (err || !out?.trim()) return reject(err)
+                resolve(out.trim().split('\n')[0].trim())
+            })
+        })
+        return stdout || null
+    } catch {
+        return null
+    }
+}
+
+async function getLatestYtDlpVersion(): Promise<string | null> {
+    try {
+        const res = await fetch(
+            'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest',
+            {
+                headers: { 'User-Agent': 'fusegrab' },
+                signal: AbortSignal.timeout(10_000),
+            },
+        )
+        if (!res.ok) return null
+        const data = (await res.json()) as { tag_name?: unknown }
+        return typeof data.tag_name === 'string' ? data.tag_name : null
+    } catch {
+        return null
+    }
+}
+
+async function isYtDlpUpdateAvailable(
+    binPath: string,
+    logger?: SessionLogger,
+): Promise<boolean> {
+    const localVersion = await getLocalYtDlpVersion(binPath)
+    const latestVersion = await getLatestYtDlpVersion()
+    const needsUpdate = ytDlpVersionNeedsUpdate(localVersion, latestVersion)
+    logger?.info(
+        `yt-dlp version check: local ${localVersion ?? 'unknown'} vs latest ${latestVersion ?? 'unreachable'} — ${needsUpdate ? 'update available' : 'up to date'}`,
+    )
+    return needsUpdate
+}
+
+/** The onedir macos build lives in its own directory next to the other binaries. */
+function getYtDlpBinPath(binDir: string): string {
+    const binName = getBinaryName()
+    return process.platform === 'darwin'
+        ? path.join(binDir, 'yt-dlp', binName)
+        : path.join(binDir, binName)
+}
+
+async function downloadYtDlp(
+    binDir: string,
+    binPath: string,
     logger?: SessionLogger,
 ): Promise<string> {
-    const binDir = path.join(app.getPath('userData'), 'bin')
-    const binName = getBinaryName()
-    const binPath = path.join(binDir, binName)
-
-    const now = Date.now()
-    let needsDownload = true
-
-    if (existsSync(binPath)) {
-        try {
-            const stat = statSync(binPath)
-            // Treat empty or tiny files as corrupt
-            if (stat.size < 1000) {
-                logger?.warn(
-                    `Existing yt-dlp binary at ${binPath} is corrupt or tiny (${stat.size} bytes). Redownloading...`,
-                )
-                needsDownload = true
-            } else if (
-                now - stat.mtimeMs > TWENTY_FOUR_HOURS_MS ||
-                forceUpdate
-            ) {
-                logger?.info(
-                    'yt-dlp binary is older than 24h or force update requested. Checking for update...',
-                )
-                needsDownload = true
-            } else {
-                logger?.info(`Using existing yt-dlp binary at: ${binPath}`)
-                needsDownload = false
-            }
-        } catch (e: any) {
-            logger?.warn(
-                `Failed to stat yt-dlp binary at ${binPath}: ${e?.message}`,
-            )
-            needsDownload = true
-        }
-    } else {
-        logger?.info(
-            `yt-dlp binary not found at ${binPath}. Downloading latest release...`,
-        )
-    }
-
-    if (!needsDownload) {
-        return binPath
-    }
-
     mkdirSync(binDir, { recursive: true })
 
     try {
@@ -115,7 +148,54 @@ export async function ensureYtDlpBinary(
                 throw new Error(errMsg)
             }
 
-            const tmpPath = `${binPath}.tmp_${now}`
+            if (process.platform === 'darwin') {
+                // The macos asset is a zip containing the binary and its
+                // _internal/ directory. Extract to a scratch dir, then swap it
+                // into place so a failed download never leaves a partial
+                // installation.
+                const scratchDir = path.join(
+                    binDir,
+                    `.yt-dlp-tmp-${Date.now()}`,
+                )
+                mkdirSync(scratchDir, { recursive: true })
+                const archivePath = path.join(scratchDir, 'yt-dlp.zip')
+                writeFileSync(archivePath, buffer)
+                await new Promise<void>((resolve, reject) => {
+                    execFile(
+                        'unzip',
+                        ['-q', archivePath, '-d', scratchDir],
+                        NO_WINDOW,
+                        (err) => (err ? reject(err) : resolve()),
+                    )
+                })
+                const extracted = path.join(scratchDir, getBinaryName())
+                if (!existsSync(extracted)) {
+                    throw new Error(
+                        'yt-dlp binary was not found inside the extracted archive',
+                    )
+                }
+                await chmod(extracted, 0o755)
+
+                const finalDir = path.dirname(binPath)
+                await rm(finalDir, { recursive: true, force: true }).catch(
+                    () => undefined,
+                )
+                await rm(archivePath, { force: true }).catch(() => undefined)
+                await rename(scratchDir, finalDir)
+                // The legacy onefile build this replaces.
+                await rm(path.join(binDir, getBinaryName()), {
+                    force: true,
+                }).catch(() => undefined)
+                // First run after a fresh install pays a ~18s cold cost while
+                // the OS pages in 177MB of new files. Run it once now, in the
+                // background, so the user's first paste isn't the one that
+                // pays it.
+                execFile(binPath, ['--version'], NO_WINDOW, () => undefined)
+                logger?.info(`yt-dlp binary updated successfully at ${binPath}`)
+                return binPath
+            }
+
+            const tmpPath = `${binPath}.tmp_${Date.now()}`
             const ws = createWriteStream(tmpPath)
             await new Promise<void>((resolve, reject) => {
                 ws.write(buffer, (writeErr) => {
@@ -152,6 +232,70 @@ export async function ensureYtDlpBinary(
     }
 
     return binPath
+}
+
+export async function ensureYtDlpBinary(
+    forceUpdate = false,
+    logger?: SessionLogger,
+): Promise<string> {
+    const binDir = path.join(app.getPath('userData'), 'bin')
+    const binPath = getYtDlpBinPath(binDir)
+
+    const now = Date.now()
+    let needsDownload = true
+
+    if (existsSync(binPath)) {
+        try {
+            const stat = statSync(binPath)
+            // Treat empty or tiny files as corrupt
+            if (stat.size < 1000) {
+                logger?.warn(
+                    `Existing yt-dlp binary at ${binPath} is corrupt or tiny (${stat.size} bytes). Redownloading...`,
+                )
+                needsDownload = true
+            } else if (
+                forceUpdate ||
+                now - stat.mtimeMs > TWENTY_FOUR_HOURS_MS
+            ) {
+                // Version-compare rather than trusting mtime: the onedir
+                // archive's entries carry the release build's mtime (not the
+                // install time), so a freshly installed binary can look older
+                // than 24h — treating that as "must download" re-fetched the
+                // ~55MB archive on every launch and stalled the first getInfo
+                // for ~50s while the download ran.
+                needsDownload = await isYtDlpUpdateAvailable(binPath, logger)
+            } else {
+                logger?.info(`Using existing yt-dlp binary at: ${binPath}`)
+                needsDownload = false
+            }
+        } catch (e: any) {
+            logger?.warn(
+                `Failed to stat yt-dlp binary at ${binPath}: ${e?.message}`,
+            )
+            needsDownload = true
+        }
+    } else {
+        logger?.info(
+            `yt-dlp binary not found at ${binPath}. Downloading latest release...`,
+        )
+    }
+
+    if (!needsDownload) {
+        return binPath
+    }
+
+    // Deduplicate: the startup pre-warm and a concurrent first user action
+    // share one in-flight download instead of racing two.
+    if (!pendingYtDlpDownload) {
+        pendingYtDlpDownload = downloadYtDlp(binDir, binPath, logger).finally(
+            () => {
+                pendingYtDlpDownload = null
+            },
+        )
+    } else {
+        logger?.info('Reusing an in-flight yt-dlp download...')
+    }
+    return pendingYtDlpDownload
 }
 
 function getFfmpegBinaryName(): string {
@@ -278,7 +422,9 @@ async function extractFfmpegFromZip(
         }
         return readFileSync(found)
     } finally {
-        await rm(scratch, { recursive: true, force: true }).catch(() => undefined)
+        await rm(scratch, { recursive: true, force: true }).catch(
+            () => undefined,
+        )
         await rm(archivePath, { force: true }).catch(() => undefined)
     }
 }
@@ -581,8 +727,27 @@ export async function ensureAria2Binary(
     return null
 }
 
-const DEFAULT_USER_AGENT =
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+/**
+ * A Chrome UA that matches the machine the app actually runs on — and the
+ * Chromium version the app actually ships. Google's sign-in flow fingerprints
+ * the browser: a UA string that contradicts the real build (e.g. a hardcoded
+ * Chrome/131 on an Electron 33 build that is Chromium 130) trips its "this
+ * browser or app may not be secure" check. Deriving from
+ * `process.versions.chrome` keeps the presented UA consistent with the
+ * `sec-ch-ua*` Client Hints the real build advertises, so it stays
+ * self-consistent across Electron upgrades too.
+ */
+export function getPlatformUserAgent(): string {
+    const chromeVersion = process.versions.chrome || '130.0.0.0'
+    const chrome = `AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`
+    if (process.platform === 'win32') {
+        return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) ${chrome}`
+    }
+    if (process.platform === 'darwin') {
+        return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ${chrome}`
+    }
+    return `Mozilla/5.0 (X11; Linux x86_64) ${chrome}`
+}
 
 const NODE_FALLBACK_PATHS =
     process.platform === 'win32'
@@ -594,16 +759,11 @@ const NODE_FALLBACK_PATHS =
                   'node.exe',
               ),
               path.join(
-                  process.env['ProgramFiles(x86)'] ||
-                      'C:\\Program Files (x86)',
+                  process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)',
                   'nodejs',
                   'node.exe',
               ),
-              path.join(
-                  process.env.APPDATA || '',
-                  'npm',
-                  'node.exe',
-              ),
+              path.join(process.env.APPDATA || '', 'npm', 'node.exe'),
               path.join(
                   process.env.LOCALAPPDATA || '',
                   'fnm_multishells',
@@ -758,17 +918,219 @@ function readExistingCookieJar(filePath: string): Map<string, string> {
 export async function getJsRuntimeArgs(
     logger?: SessionLogger,
 ): Promise<string[]> {
+    // Deno is yt-dlp's default and best-supported runtime for YouTube's JS
+    // challenges; node is the fallback when deno could not be installed.
+    const denoPath = await ensureDenoBinary(logger)
+    if (denoPath) {
+        return ['--js-runtimes', `deno:${denoPath}`]
+    }
     const runtime = await resolveJsRuntime(logger)
     return runtime ? ['--js-runtimes', `node:${runtime}`] : []
+}
+
+function getDenoBinaryName(): string {
+    if (process.platform === 'win32') return 'deno.exe'
+    return 'deno'
+}
+
+/**
+ * The app cannot rely on the user having deno or node installed: a packaged
+ * app launched from Finder/Dock or Explorer inherits a minimal PATH, and most
+ * Windows users simply don't have node. So deno is downloaded next to yt-dlp,
+ * exactly like the app already does for yt-dlp/ffmpeg/aria2.
+ */
+function getDenoDownloadAsset(): string | null {
+    const { platform, arch } = process
+    if (platform === 'win32') {
+        if (arch === 'x64' || arch === 'ia32') {
+            return 'deno-x86_64-pc-windows-msvc.zip'
+        }
+        if (arch === 'arm64') return 'deno-aarch64-pc-windows-msvc.zip'
+        return null
+    }
+    if (platform === 'darwin') {
+        return arch === 'arm64'
+            ? 'deno-aarch64-apple-darwin.zip'
+            : 'deno-x86_64-apple-darwin.zip'
+    }
+    if (platform === 'linux') {
+        if (arch === 'x64') return 'deno-x86_64-unknown-linux-gnu.zip'
+        if (arch === 'arm64') return 'deno-aarch64-unknown-linux-gnu.zip'
+        return null
+    }
+    return null
+}
+
+function runExecFileQuiet(file: string, args: string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+        execFile(file, args, NO_WINDOW, (err) =>
+            err ? reject(err) : resolve(),
+        )
+    })
+}
+
+function findFileRecursive(dir: string, targetName: string): string | null {
+    const entries = readdirSync(dir, { withFileTypes: true })
+    for (const entry of entries) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+            const hit = findFileRecursive(full, targetName)
+            if (hit) return hit
+        } else if (entry.name.toLowerCase() === targetName.toLowerCase()) {
+            return full
+        }
+    }
+    return null
+}
+
+async function extractDenoArchive(
+    archivePath: string,
+    binDir: string,
+    logger?: SessionLogger,
+): Promise<string | null> {
+    const targetName = getDenoBinaryName()
+    const scratch = path.join(binDir, `deno_unzip_${Date.now()}`)
+    try {
+        mkdirSync(scratch, { recursive: true })
+        if (process.platform === 'win32') {
+            // Windows 10+ ships bsdtar, which reads zips and is far faster than
+            // PowerShell's Expand-Archive. Fall back to PowerShell if absent.
+            try {
+                await runExecFileQuiet('tar', [
+                    '-xf',
+                    archivePath,
+                    '-C',
+                    scratch,
+                ])
+            } catch {
+                await runExecFileQuiet('powershell', [
+                    '-NoProfile',
+                    '-NonInteractive',
+                    '-Command',
+                    `Expand-Archive -LiteralPath "${archivePath}" -DestinationPath "${scratch}" -Force`,
+                ])
+            }
+        } else {
+            await runExecFileQuiet('unzip', ['-q', archivePath, '-d', scratch])
+        }
+
+        const found = findFileRecursive(scratch, targetName)
+        if (!found) {
+            logger?.warn(`${targetName} was not found inside the deno archive.`)
+            return null
+        }
+
+        const dest = path.join(binDir, targetName)
+        await rename(found, dest).catch(() => undefined)
+        if (process.platform !== 'win32') {
+            await chmod(dest, 0o755).catch(() => undefined)
+        }
+        return hasUsableBinary(dest) ? dest : null
+    } finally {
+        await rm(scratch, { recursive: true, force: true }).catch(
+            () => undefined,
+        )
+        await rm(archivePath, { force: true }).catch(() => undefined)
+    }
+}
+
+let cachedDenoPath: string | null | undefined
+
+/**
+ * Ensure a deno binary exists in the app's bin dir, downloading it once if
+ * needed. yt-dlp needs a JS runtime to solve YouTube's player challenges;
+ * without one it silently degrades to a limited player client and YouTube's
+ * anti-bot escalates.
+ */
+export async function ensureDenoBinary(
+    logger?: SessionLogger,
+): Promise<string | null> {
+    if (cachedDenoPath !== undefined) return cachedDenoPath
+
+    // Bundled in the installer via scripts/fetch-deno.mjs → resources/deno/
+    // (mirrors ffmpeg). Prefer it: zero first-run download in packaged builds.
+    const resourcesPath = (
+        process as NodeJS.Process & { resourcesPath?: string }
+    ).resourcesPath
+    const bundledPath = resourcesPath
+        ? path.join(resourcesPath, 'deno', getDenoBinaryName())
+        : null
+    if (bundledPath && hasUsableBinary(bundledPath)) {
+        if (process.platform !== 'win32') {
+            await chmod(bundledPath, 0o755).catch(() => undefined)
+        }
+        logger?.info(`Using bundled deno JS runtime at: ${bundledPath}`)
+        cachedDenoPath = bundledPath
+        return bundledPath
+    }
+
+    const binDir = path.join(app.getPath('userData'), 'bin')
+    const binPath = path.join(binDir, getDenoBinaryName())
+
+    if (hasUsableBinary(binPath)) {
+        logger?.info(`Found cached deno JS runtime at: ${binPath}`)
+        cachedDenoPath = binPath
+        return binPath
+    }
+
+    const asset = getDenoDownloadAsset()
+    if (!asset) {
+        logger?.warn(
+            `Automatic deno download is not supported on ${process.platform}-${process.arch}.`,
+        )
+        cachedDenoPath = null
+        return null
+    }
+
+    try {
+        mkdirSync(binDir, { recursive: true })
+        const url = `https://github.com/denoland/deno/releases/latest/download/${asset}`
+        logger?.info(`Downloading deno JS runtime from ${url}...`)
+        const res = await fetch(url, { redirect: 'follow' })
+        if (!res.ok) {
+            logger?.warn(
+                `Failed to fetch deno archive: HTTP ${res.status} ${res.statusText}`,
+            )
+            cachedDenoPath = null
+            return null
+        }
+        const payload = Buffer.from(await res.arrayBuffer())
+        if (payload.length < 1_000_000) {
+            logger?.warn(
+                'Downloaded deno archive is too small, likely corrupt.',
+            )
+            cachedDenoPath = null
+            return null
+        }
+
+        const archivePath = path.join(binDir, `deno_archive_${Date.now()}.zip`)
+        writeFileSync(archivePath, payload)
+
+        const installed = await extractDenoArchive(archivePath, binDir, logger)
+        if (installed) {
+            logger?.info(`deno JS runtime installed at ${installed}`)
+            cachedDenoPath = installed
+            return installed
+        }
+    } catch (err: any) {
+        logger?.warn(
+            `Failed to install deno JS runtime: ${err?.message || String(err)}`,
+        )
+    }
+
+    cachedDenoPath = null
+    return null
 }
 
 export async function getAntiRateLimitArgs(
     win?: BrowserWindow | null,
     logger?: SessionLogger,
+    options?: { includeCookieJar?: boolean },
 ): Promise<string[]> {
+    const includeCookieJar = options?.includeCookieJar ?? true
     const userAgent =
         (win && !win.isDestroyed() && win.webContents.getUserAgent()) ||
-        DEFAULT_USER_AGENT
+        getPlatformUserAgent()
 
     const args: string[] = [
         '--user-agent',
@@ -803,61 +1165,210 @@ export async function getAntiRateLimitArgs(
     }
     args.push('--concurrent-fragments', '5')
 
-    try {
-        const { session } = await import('electron')
-        const partitions = ['persist:yt-scraper']
-        const allCookies: any[] = []
-        const seenNames = new Set<string>()
-
-        for (const part of partitions) {
-            try {
-                const ses = session.fromPartition(part)
-                const cookies = await ses.cookies.get({
-                    domain: '.youtube.com',
-                })
-                for (const c of cookies) {
-                    if (!seenNames.has(c.name)) {
-                        seenNames.add(c.name)
-                        allCookies.push(c)
-                    }
-                }
-            } catch {}
-        }
-
-        const cookieFilePath = path.join(
-            app.getPath('userData'),
-            'yt_cookies.txt',
-        )
-
-        // Merge: start with what yt-dlp has already accumulated
-        const mergedJar = readExistingCookieJar(cookieFilePath)
-        let overlayCount = 0
-
-        // Overlay fresh Electron cookies on top
-        for (const c of allCookies) {
-            const domain = c.domain.startsWith('.') ? c.domain : `.${c.domain}`
-            const cookiePath = c.path || '/'
-            const flag = 'TRUE'
-            const secure = c.secure ? 'TRUE' : 'FALSE'
-            const expiration = Math.floor(
-                c.expirationDate || Date.now() / 1000 + 86400 * 365,
-            )
-            const line = `${domain}\t${flag}\t${cookiePath}\t${secure}\t${expiration}\t${c.name}\t${c.value}`
-            mergedJar.set(cookieKey(domain, cookiePath, c.name), line)
-            overlayCount++
-        }
-
-        if (mergedJar.size > 0) {
-            const cookieLines = [...COOKIE_FILE_HEADER, ...mergedJar.values()]
-            writeFileSync(cookieFilePath, cookieLines.join('\n'), 'utf-8')
-            args.push('--cookies', cookieFilePath)
-            logger?.info(
-                `Merged ${mergedJar.size} cookies (${overlayCount} from Electron session, ${mergedJar.size - overlayCount} preserved from yt-dlp) into ${cookieFilePath}`,
-            )
-        }
-    } catch (err: any) {
-        logger?.warn(`Failed to export browser cookies: ${err?.message}`)
+    if (includeCookieJar) {
+        args.push(...(await getCookieJarArgs(logger)))
     }
 
     return args
+}
+
+/**
+ * Point yt-dlp at the Netscape cookie jar. The jar is maintained by yt-dlp
+ * itself: the browser-import step writes the signed-in session into it, and
+ * downloads accumulate visitor identity cookies (VISITOR_INFO1_LIVE,
+ * __Secure-ROLLOUT_TOKEN) back into it. This only prunes expired entries and
+ * passes it through — nothing else in the app edits it. Discarding it would
+ * present a brand-new anonymous visitor on every download, the exact pattern
+ * that triggers "Sign in to confirm you're not a bot".
+ */
+async function getCookieJarArgs(logger?: SessionLogger): Promise<string[]> {
+    const args: string[] = []
+    try {
+        const cookieFilePath = getYtCookieJarPath()
+        if (!existsSync(cookieFilePath)) return args
+
+        const jar = readExistingCookieJar(cookieFilePath)
+        if (jar.size === 0) return args
+
+        writeFileSync(
+            cookieFilePath,
+            [...COOKIE_FILE_HEADER, ...jar.values()].join('\n'),
+            'utf-8',
+        )
+        args.push('--cookies', cookieFilePath)
+        logger?.info(
+            `Passing ${jar.size} cookies from ${cookieFilePath} to yt-dlp`,
+        )
+    } catch (err: any) {
+        logger?.warn(`Failed to prepare cookie jar: ${err?.message}`)
+    }
+    return args
+}
+
+/** Location of the Netscape cookie jar shared with yt-dlp. */
+export function getYtCookieJarPath(): string {
+    return path.join(app.getPath('userData'), 'yt_cookies.txt')
+}
+
+/**
+ * Browsers yt-dlp knows how to read cookies from (`--cookies-from-browser`),
+ * in preference order. Detection is path-based so a failing attempt isn't
+ * wasted on a browser that isn't installed. Safari is deliberately excluded on
+ * macOS: reading its cookies needs Full Disk Access, which a packaged app does
+ * not have by default.
+ */
+/** macOS app names for `open -Ra` / `open -a` lookups. */
+export const MAC_BROWSER_APP_NAMES: Record<string, string> = {
+    chrome: 'Google Chrome',
+    edge: 'Microsoft Edge',
+    brave: 'Brave Browser',
+    firefox: 'Firefox',
+}
+
+let cachedDetectedBrowsers: string[] | null = null
+
+/**
+ * Browsers yt-dlp knows how to read cookies from (`--cookies-from-browser`),
+ * in preference order. Path-based detection covers both /Applications and the
+ * user's ~/Applications (many macOS installs are user-level); as a final,
+ * authoritative check on macOS, `open -Ra` resolves the app regardless of
+ * where it lives. Safari is deliberately last: reading its cookies needs Full
+ * Disk Access, which the app cannot request automatically.
+ *
+ * Result is cached for the process lifetime (re-detect on next launch).
+ */
+export function detectInstalledBrowsers(): string[] {
+    if (cachedDetectedBrowsers !== null) return cachedDetectedBrowsers
+
+    const home = os.homedir()
+    const candidates: Array<[string, string[]]> =
+        process.platform === 'win32'
+            ? [
+                  [
+                      'edge',
+                      [
+                          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+                          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+                      ],
+                  ],
+                  [
+                      'chrome',
+                      [
+                          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+                          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+                      ],
+                  ],
+                  [
+                      'brave',
+                      [
+                          'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+                      ],
+                  ],
+                  [
+                      'firefox',
+                      [
+                          'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
+                          'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe',
+                      ],
+                  ],
+              ]
+            : process.platform === 'darwin'
+              ? [
+                    [
+                        'chrome',
+                        [
+                            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                            path.join(
+                                home,
+                                'Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                            ),
+                        ],
+                    ],
+                    [
+                        'edge',
+                        [
+                            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+                            path.join(
+                                home,
+                                'Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+                            ),
+                        ],
+                    ],
+                    [
+                        'brave',
+                        [
+                            '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+                            path.join(
+                                home,
+                                'Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+                            ),
+                        ],
+                    ],
+                    [
+                        'firefox',
+                        [
+                            '/Applications/Firefox.app/Contents/MacOS/firefox',
+                            path.join(
+                                home,
+                                'Applications/Firefox.app/Contents/MacOS/firefox',
+                            ),
+                        ],
+                    ],
+                    [
+                        // Always present on macOS; reading its cookies needs
+                        // Full Disk Access, so it is tried last and fails with
+                        // a tailored message.
+                        'safari',
+                        ['/Applications/Safari.app/Contents/MacOS/Safari'],
+                    ],
+                ]
+              : [
+                    [
+                        'chromium',
+                        ['/usr/bin/chromium', '/usr/bin/chromium-browser'],
+                    ],
+                    ['firefox', ['/usr/bin/firefox']],
+                ]
+
+    const found = candidates
+        .filter(([, paths]) => paths.some((p) => p && existsSync(p)))
+        .map(([name]) => name)
+
+    // Authoritative fallback: `open -Ra` resolves an app anywhere on the
+    // system, so a browser in an unusual location is still detected.
+    if (process.platform === 'darwin') {
+        for (const [name, appName] of Object.entries(MAC_BROWSER_APP_NAMES)) {
+            if (found.includes(name)) continue
+            try {
+                execFileSync('open', ['-Ra', appName], {
+                    stdio: 'ignore',
+                    windowsHide: true,
+                })
+                found.push(name)
+            } catch {
+                // Not installed.
+            }
+        }
+    }
+
+    cachedDetectedBrowsers = found
+    return found
+}
+
+/**
+ * Background warm-up for the runtime binaries so the first paste or download
+ * never blocks on a fetch. yt-dlp is version-checked on every startup
+ * (forceUpdate) so YouTube-side breakage heals without waiting for the 24h
+ * window; deno is bundled in the installer, so it is a no-op in packaged
+ * builds. Shared promises mean a concurrent ensure* call awaits the same
+ * in-flight download instead of starting a second one.
+ */
+export function prewarmYoutubeBinaries(
+    logger?: SessionLogger,
+): Promise<PromiseSettledResult<string | null>[]> {
+    return Promise.allSettled([
+        ensureYtDlpBinary(true, logger),
+        ensureAria2Binary(logger),
+        ensureDenoBinary(logger),
+    ])
 }

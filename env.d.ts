@@ -41,6 +41,21 @@ declare global {
                     options: DownloadChannelOptions,
                 ) => Promise<void>
                 cancelDownload: () => Promise<void>
+                openSignIn: () => Promise<void>
+                cancelSignIn: () => Promise<void>
+                getSignInState: () => Promise<boolean>
+                getAccountInfo: () => Promise<{
+                    name: string
+                    avatarUrl: string | null
+                    email: string | null
+                } | null>
+                signOut: () => Promise<void>
+                onSignInState: (
+                    cb: (state: {
+                        status: 'opened' | 'signed-in' | 'closed' | 'signed-out'
+                        url?: string
+                    }) => void,
+                ) => () => void
                 getDownloadState: () => Promise<ActiveDownloadState>
                 onProgress: (
                     cb: (progress: {

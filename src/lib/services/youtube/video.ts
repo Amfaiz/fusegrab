@@ -1,3 +1,4 @@
+import type { SessionLogger } from '../logger/service'
 import type {
     ActiveDownloadState,
     DownloadOptions,
@@ -7,56 +8,47 @@ import type {
 import type { BrowserWindow } from 'electron'
 
 import ffmpegPath from 'ffmpeg-static'
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 import { getSessionLogger } from '../logger/service'
 
-import {
-    ensureFfmpegBinary,
-    ensureYtDlpBinary,
-    getAntiRateLimitArgs,
-    getJsRuntimeArgs,
-    spawnOptions,
-} from './binary'
+import { ensureFfmpegBinary, ensureYtDlpBinary, spawnOptions } from './binary'
 import { buildVideoFormatSelector } from './format'
+import {
+    buildFailureMessage,
+    buildYtDlpAttempts,
+    runJsonAttempts,
+    shouldContinueToNextAttempt,
+    shouldRetryWithAlternative,
+} from './retry'
 
 export async function getYoutubeVideoInfo(
     url: string,
+    win?: BrowserWindow | null,
+    logger?: SessionLogger,
 ): Promise<YoutubeVideoInfo> {
     const cleanUrl = url.trim()
     if (!cleanUrl) {
         throw new Error('Invalid YouTube video URL')
     }
 
-    const ytDlpPath = await ensureYtDlpBinary()
-    const antiRateLimitArgs = await getAntiRateLimitArgs()
-    const jsRuntimeArgs = await getJsRuntimeArgs()
-
-    const stdout = await new Promise<string>((resolve, reject) => {
-        execFile(
-            ytDlpPath,
-            [
-                ...antiRateLimitArgs,
-                ...jsRuntimeArgs,
-                '--no-playlist',
-                '--dump-single-json',
-                cleanUrl,
-            ],
-            { maxBuffer: 50 * 1024 * 1024 },
-            (err, out) => {
-                if (err)
-                    return reject(
-                        new Error(
-                            err.message || 'Failed to fetch YouTube video info',
-                        ),
-                    )
-                resolve(out)
-            },
-        )
-    })
+    // yt-dlp and the strategy ladder (aria2, deno, cookie jar) are independent
+    // — fetch them in parallel so the first run stalls on the slowest, not the
+    // sum. The shared download promise in ensureYtDlpBinary dedupes against
+    // the startup pre-warm.
+    const [ytDlpPath, attempts] = await Promise.all([
+        ensureYtDlpBinary(),
+        buildYtDlpAttempts(win, logger),
+    ])
+    const stdout = await runJsonAttempts(
+        ytDlpPath,
+        attempts,
+        ['--no-playlist', '--dump-single-json', cleanUrl],
+        logger,
+    )
 
     const data = JSON.parse(stdout)
     const seenHeights = new Set<number>()
@@ -117,86 +109,45 @@ export async function getYoutubeVideoInfo(
     }
 }
 
-export async function downloadYoutubeVideo(
-    win: BrowserWindow | null,
-    options: DownloadOptions,
-    onProcessStart: (proc: any) => void,
-    onProcessEnd: () => void,
-    updateState: (patch: Partial<ActiveDownloadState>) => void,
-    startPower: () => void,
-    stopPower: () => void,
-): Promise<{ filePath: string; size: number }> {
-    const { url, savePath, qualityItag, height, rootDownloadDir } = options
-    const logDir =
-        rootDownloadDir ||
-        (path.dirname(savePath).includes(path.sep)
-            ? path.dirname(path.dirname(savePath))
-            : path.dirname(savePath))
-    const logger = getSessionLogger()
-    logger.setDownloadRoot(logDir)
+interface VideoAttemptDeps {
+    ytDlpPath: string
+    args: string[]
+    win: BrowserWindow | null
+    cleanUrl: string
+    savePath: string
+    isAudioOnly: boolean
+    logger: SessionLogger
+    onProcessStart: (proc: any) => void
+    onProcessEnd: () => void
+    updateState: (patch: Partial<ActiveDownloadState>) => void
+    startPower: () => void
+    stopPower: () => void
+}
 
-    const downloadLabel = `Single Video Download — ${path.basename(savePath)}`
-    logger.startDownload(downloadLabel, {
-        url,
+/**
+ * One yt-dlp spawn for a single-video download. Progress events are streamed to
+ * the renderer; the promise resolves with the verified output path or rejects
+ * with a message derived from yt-dlp's stderr.
+ */
+async function runVideoDownloadAttempt(
+    deps: VideoAttemptDeps,
+): Promise<{ filePath: string }> {
+    const {
+        ytDlpPath,
+        args,
+        win,
+        cleanUrl,
         savePath,
-        qualityItag,
-        height,
-    })
+        isAudioOnly,
+        logger,
+        onProcessStart,
+        onProcessEnd,
+        updateState,
+        startPower,
+        stopPower,
+    } = deps
 
-    const cleanUrl = url.trim()
-    logger.info('Step 1/4: Resolving yt-dlp binary...')
-    const ytDlpPath = await ensureYtDlpBinary(false, logger)
-    logger.info(`yt-dlp binary located at: ${ytDlpPath}`)
-
-    logger.info('Step 2/4: Fetching anti-rate-limit parameters...')
-    const antiRateLimitArgs = await getAntiRateLimitArgs(win, logger)
-    logger.info(
-        `Anti-rate-limit arguments: ${JSON.stringify(antiRateLimitArgs)}`,
-    )
-
-    const resolvedFfmpegPath = await ensureFfmpegBinary(ffmpegPath, logger)
-    const canMerge = Boolean(resolvedFfmpegPath)
-
-    const args: string[] = [
-        ...antiRateLimitArgs,
-        ...(await getJsRuntimeArgs(logger)),
-        '--newline',
-        '--no-mtime',
-    ]
-
-    if (resolvedFfmpegPath) {
-        args.push('--ffmpeg-location', resolvedFfmpegPath)
-        // Only meaningful with ffmpeg present; without it yt-dlp cannot mux.
-        args.push('--merge-output-format', 'mp4')
-        logger.info(`ffmpeg binary located at: ${resolvedFfmpegPath}`)
-    } else {
-        logger.warn(
-            'ffmpeg binary not found. Falling back to a single pre-merged format; quality may be lower than requested.',
-        )
-    }
-
-    const isAudioOnly =
-        qualityItag === -1 || savePath.toLowerCase().endsWith('.mp3')
-
-    if (isAudioOnly) {
-        args.push('-f', 'bestaudio')
-        if (canMerge) {
-            // Transcoding to mp3 is an ffmpeg postprocessor.
-            args.push('-x', '--audio-format', 'mp3')
-        }
-    } else {
-        const targetHeight =
-            height ||
-            (typeof qualityItag === 'number' && qualityItag > 0
-                ? qualityItag
-                : null)
-        args.push('-f', buildVideoFormatSelector(targetHeight, canMerge))
-    }
-
-    args.push('-o', savePath, cleanUrl)
-
-    logger.info(`Step 3/4: Command args constructed: ${args.join(' ')}`)
-    logger.info(`Step 4/4: Spawning yt-dlp child process...`)
+    logger.info(`Spawning yt-dlp child process with: ${args.join(' ')}`)
 
     startPower()
     updateState({
@@ -212,6 +163,7 @@ export async function downloadYoutubeVideo(
     logger.info(`yt-dlp child process spawned with PID ${proc.pid}`)
 
     const stderrLines: string[] = []
+    const rawStderrLines: string[] = []
 
     // Weighted multi-stream progress tracking
     // Video+audio downloads report two separate 0-100% streams.
@@ -319,6 +271,7 @@ export async function downloadYoutubeVideo(
         proc.stderr.on('data', (data: Buffer) => {
             const str = data.toString()
             logger.logStderrLine(str)
+            rawStderrLines.push(str.trim())
             if (!str.includes('WARNING:')) {
                 stderrLines.push(str.trim())
             }
@@ -329,7 +282,6 @@ export async function downloadYoutubeVideo(
             onProcessEnd()
             updateState({ isDownloading: false })
             logger.error('yt-dlp process encountered error', err)
-            logger.endDownload(downloadLabel, false)
             await rm(savePath, { force: true }).catch(() => undefined)
             reject(err)
         })
@@ -369,7 +321,6 @@ export async function downloadYoutubeVideo(
                 logger.info(
                     `Video download successfully completed and verified at ${finalPath}`,
                 )
-                logger.endDownload(downloadLabel, true)
                 if (win && !win.isDestroyed()) {
                     win.webContents.send('youtube:progress', {
                         downloadedBytes: 100,
@@ -377,20 +328,135 @@ export async function downloadYoutubeVideo(
                         percent: 100,
                     })
                 }
-                resolve({ filePath: finalPath, size: 0 })
+                resolve({ filePath: finalPath })
             } else {
                 logger.error(
                     `Video download failed (exit code ${code}, file verified: ${existsSync(finalPath)})`,
                 )
                 await rm(savePath, { force: true }).catch(() => undefined)
-                const errMsg =
-                    stderrLines.length > 0
-                        ? stderrLines.slice(-3).join(' ')
-                        : `Video download failed with exit code ${code}`
+                const errMsg = buildFailureMessage(
+                    stderrLines,
+                    rawStderrLines,
+                    code,
+                )
                 logger.error(`Error details: ${errMsg}`)
-                logger.endDownload(downloadLabel, false)
                 reject(new Error(errMsg))
             }
         })
     })
+}
+
+export async function downloadYoutubeVideo(
+    win: BrowserWindow | null,
+    options: DownloadOptions,
+    onProcessStart: (proc: any) => void,
+    onProcessEnd: () => void,
+    updateState: (patch: Partial<ActiveDownloadState>) => void,
+    startPower: () => void,
+    stopPower: () => void,
+): Promise<{ filePath: string; size: number }> {
+    const { url, savePath, qualityItag, height, rootDownloadDir } = options
+    const logDir =
+        rootDownloadDir ||
+        (path.dirname(savePath).includes(path.sep)
+            ? path.dirname(path.dirname(savePath))
+            : path.dirname(savePath))
+    const logger = getSessionLogger()
+    logger.setDownloadRoot(logDir)
+
+    const downloadLabel = `Single Video Download — ${path.basename(savePath)}`
+    logger.startDownload(downloadLabel, {
+        url,
+        savePath,
+        qualityItag,
+        height,
+    })
+
+    const cleanUrl = url.trim()
+    logger.info(
+        'Step 1/4: Resolving yt-dlp binary, ffmpeg, and download strategies...',
+    )
+    const [ytDlpPath, resolvedFfmpegPath, attempts] = await Promise.all([
+        ensureYtDlpBinary(false, logger),
+        ensureFfmpegBinary(ffmpegPath, logger),
+        buildYtDlpAttempts(win, logger),
+    ])
+    logger.info(`yt-dlp binary located at: ${ytDlpPath}`)
+    logger.info(`Strategies: ${attempts.map((a) => a.label).join(' → ')}`)
+    const canMerge = Boolean(resolvedFfmpegPath)
+
+    const baseArgs: string[] = ['--newline', '--no-mtime']
+
+    if (resolvedFfmpegPath) {
+        baseArgs.push('--ffmpeg-location', resolvedFfmpegPath)
+        // Only meaningful with ffmpeg present; without it yt-dlp cannot mux.
+        baseArgs.push('--merge-output-format', 'mp4')
+        logger.info(`ffmpeg binary located at: ${resolvedFfmpegPath}`)
+    } else {
+        logger.warn(
+            'ffmpeg binary not found. Falling back to a single pre-merged format; quality may be lower than requested.',
+        )
+    }
+
+    const isAudioOnly =
+        qualityItag === -1 || savePath.toLowerCase().endsWith('.mp3')
+
+    if (isAudioOnly) {
+        baseArgs.push('-f', 'bestaudio')
+        if (canMerge) {
+            // Transcoding to mp3 is an ffmpeg postprocessor.
+            baseArgs.push('-x', '--audio-format', 'mp3')
+        }
+    } else {
+        const targetHeight =
+            height ||
+            (typeof qualityItag === 'number' && qualityItag > 0
+                ? qualityItag
+                : null)
+        baseArgs.push('-f', buildVideoFormatSelector(targetHeight, canMerge))
+    }
+
+    baseArgs.push('-o', savePath, cleanUrl)
+
+    let lastError: Error | null = null
+    let botCheckError: Error | null = null
+
+    for (let i = 0; i < attempts.length; i++) {
+        const attempt = attempts[i]
+        logger.info(
+            `Download attempt ${i + 1}/${attempts.length}: ${attempt.label}`,
+        )
+        try {
+            const result = await runVideoDownloadAttempt({
+                ytDlpPath,
+                args: [...attempt.args, ...baseArgs],
+                win,
+                cleanUrl,
+                savePath,
+                isAudioOnly,
+                logger,
+                onProcessStart,
+                onProcessEnd,
+                updateState,
+                startPower,
+                stopPower,
+            })
+            logger.endDownload(downloadLabel, true)
+            return { filePath: result.filePath, size: 0 }
+        } catch (err: any) {
+            const error = err instanceof Error ? err : new Error(String(err))
+            lastError = error
+            logger.warn(`Attempt "${attempt.label}" failed: ${error.message}`)
+            if (!botCheckError && shouldRetryWithAlternative(error.message)) {
+                botCheckError = error
+            }
+            if (!shouldContinueToNextAttempt(error.message)) {
+                logger.endDownload(downloadLabel, false)
+                throw botCheckError ?? error
+            }
+        }
+    }
+
+    logger.endDownload(downloadLabel, false)
+    throw botCheckError ?? lastError ?? new Error('Video download failed')
 }

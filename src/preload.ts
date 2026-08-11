@@ -74,6 +74,30 @@ contextBridge.exposeInMainWorld('api', {
             rootDownloadDir?: string
         }) => ipcRenderer.invoke('youtube:download-channel', options),
         cancelDownload: () => ipcRenderer.invoke('youtube:cancel-download'),
+        openSignIn: () => ipcRenderer.invoke('youtube:open-sign-in'),
+        cancelSignIn: () => ipcRenderer.invoke('youtube:cancel-sign-in'),
+        getSignInState: () =>
+            ipcRenderer.invoke('youtube:get-sign-in-state') as Promise<boolean>,
+        getAccountInfo: () =>
+            ipcRenderer.invoke('youtube:get-account-info') as Promise<{
+                name: string
+                avatarUrl: string | null
+                email: string | null
+            } | null>,
+        signOut: () => ipcRenderer.invoke('youtube:sign-out') as Promise<void>,
+        onSignInState: (
+            cb: (state: {
+                status: 'opened' | 'signed-in' | 'closed' | 'signed-out'
+                /** Present when status is 'opened': load this in the webview. */
+                url?: string
+            }) => void,
+        ) => {
+            const handler = (_: unknown, state: unknown) => cb(state as any)
+            ipcRenderer.on('youtube:sign-in-state', handler)
+            return () => {
+                ipcRenderer.off('youtube:sign-in-state', handler)
+            }
+        },
         getDownloadState: () =>
             ipcRenderer.invoke('youtube:get-download-state'),
         onProgress: (

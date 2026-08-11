@@ -70,12 +70,15 @@ describe('pickBestAsset fallbacks', () => {
             asset('FuseGrab-1.2.0-x64.dmg'),
         ]
 
+        expect(pickBestAsset(assets, '.dmg', 'arm64')?.name).toBe(
+            'FuseGrab-1.2.0-x64.dmg',
+        )
         expect(
-            pickBestAsset(assets, '.dmg', 'arm64')?.name,
-        ).toBe('FuseGrab-1.2.0-x64.dmg')
-        expect(
-            pickBestAsset([asset('FuseGrab-1.2.0-universal.dmg')], '.dmg', 'arm64')
-                ?.name,
+            pickBestAsset(
+                [asset('FuseGrab-1.2.0-universal.dmg')],
+                '.dmg',
+                'arm64',
+            )?.name,
         ).toBe('FuseGrab-1.2.0-universal.dmg')
     })
 })
