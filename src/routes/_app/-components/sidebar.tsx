@@ -2,22 +2,136 @@ import type { DownloadItem } from './types'
 
 import { useState } from 'react'
 
-import { ExternalLink, Folder, FolderOpen, Video } from '#/components/icons'
+import {
+    Anonymous,
+    Folder,
+    FolderOpen,
+    Globe,
+    Logout,
+    Video,
+    Whatsapp,
+    Youtube,
+} from '#/components/icons'
+import {
+    Menu,
+    MenuContent,
+    MenuItem,
+    MenuSeparator,
+    MenuTrigger,
+} from '#/components/ui/menu'
 
 import amfaizIcon from '../../../../assets/amfaiz-icon.png'
 
 import { UpdatePanel } from './update-panel'
 
+interface AccountInfo {
+    name: string
+    avatarUrl: string | null
+    email: string | null
+}
+
 interface DownloaderSidebarProps {
     items: DownloadItem[]
     activeFilter: string
     setActiveFilter: (filter: string) => void
+    onSignIn: () => void
+    onSignOut: () => void
+    signedIn: boolean
+    accountInfo: AccountInfo | null
+}
+
+interface AccountSectionProps {
+    onSignIn: () => void
+    onSignOut: () => void
+    signedIn: boolean
+    accountInfo: AccountInfo | null
+}
+
+/**
+ * A single compact sign-in row. Anonymous shows a "Sign in to YouTube"
+ * button; signed in, it becomes an account button (avatar + name) opening a
+ * dropdown with the account details, a switch-account item, and Log out.
+ */
+function AccountSection({
+    onSignIn,
+    onSignOut,
+    signedIn,
+    accountInfo,
+}: AccountSectionProps) {
+    if (!signedIn) {
+        return (
+            <button
+                type="button"
+                onClick={onSignIn}
+                className="text-foreground/80 hover:bg-muted hover:text-foreground flex w-full items-center gap-1.5 rounded-md p-1.75 text-xs transition-colors"
+            >
+                <Youtube className="text-muted-foreground size-3.5 shrink-0" />
+                <span className="truncate">Sign in to YouTube</span>
+            </button>
+        )
+    }
+
+    return (
+        <Menu>
+            <MenuTrigger className="hover:bg-muted text-foreground/80 hover:text-foreground flex w-full items-center gap-1.5 rounded-md p-1.75 text-xs transition-colors outline-none">
+                {accountInfo?.avatarUrl ? (
+                    <img
+                        src={accountInfo.avatarUrl}
+                        alt=""
+                        className="size-4 shrink-0 rounded-full"
+                    />
+                ) : (
+                    <Anonymous className="text-primary size-3.5 shrink-0" />
+                )}
+                <span className="truncate">
+                    {accountInfo?.name || 'Anonymous'}
+                </span>
+            </MenuTrigger>
+            <MenuContent sideOffset={4} align="start" className="w-52">
+                {accountInfo && (
+                    <>
+                        <div className="flex items-center gap-2.5 px-2.5 py-2">
+                            {accountInfo.avatarUrl && (
+                                <img
+                                    src={accountInfo.avatarUrl}
+                                    alt=""
+                                    className="size-8 shrink-0 rounded-full"
+                                />
+                            )}
+                            <div className="min-w-0">
+                                <p className="truncate text-xs font-medium">
+                                    {accountInfo.name}
+                                </p>
+                                {accountInfo.email && (
+                                    <p className="text-muted-foreground truncate text-[10px]">
+                                        {accountInfo.email}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        <MenuSeparator />
+                    </>
+                )}
+                <MenuItem
+                    onClick={onSignOut}
+                    className="text-danger hover:bg-danger/10 focus:bg-danger/10"
+                >
+                    <Logout className="size-3.5" />
+                    <span>Log out</span>
+                </MenuItem>
+            </MenuContent>
+        </Menu>
+    )
 }
 
 export function DownloaderSidebar({
     items,
     activeFilter,
     setActiveFilter,
+    onSignIn,
+    onSignOut,
+    signedIn,
+    accountInfo,
 }: DownloaderSidebarProps) {
     const [isChannelsOpen, setIsChannelsOpen] = useState(true)
 
@@ -146,30 +260,49 @@ export function DownloaderSidebar({
             </div>
             <UpdatePanel />
 
-            <div className="border-border flex w-full items-start border-t p-2.5">
-                <a
-                    href="https://amfaiz.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="hover:bg-muted flex grow items-center gap-1.5 rounded-md p-1.75 transition-colors"
-                >
-                    <img
-                        src={amfaizIcon}
-                        alt="amfaiz"
-                        className="size-4 object-contain"
+            <div className="border-border flex w-full items-center gap-1 border-t p-2">
+                <div className="min-w-0 flex-1">
+                    <AccountSection
+                        onSignIn={onSignIn}
+                        onSignOut={onSignOut}
+                        signedIn={signedIn}
+                        accountInfo={accountInfo}
                     />
-                    <span
-                        className="text-foreground text-sm leading-none"
-                        style={{
-                            fontFamily:
-                                '"Noto Serif", Georgia, "Times New Roman", serif',
-                        }}
+                </div>
+                <Menu>
+                    <MenuTrigger
+                        aria-label="Links"
+                        title="Links"
+                        className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors outline-none"
                     >
-                        amfaiz
-                    </span>
-
-                    <ExternalLink className="ml-auto size-3" />
-                </a>
+                        <img
+                            src={amfaizIcon}
+                            alt=""
+                            className="size-4 object-contain"
+                        />
+                    </MenuTrigger>
+                    <MenuContent sideOffset={4} className="w-52">
+                        <MenuItem
+                            onClick={() =>
+                                window.open('https://amfaiz.com/', '_blank')
+                            }
+                        >
+                            <Globe className="size-3.5" />
+                            <span>Website</span>
+                        </MenuItem>
+                        <MenuItem
+                            onClick={() =>
+                                window.open(
+                                    'https://www.whatsapp.com/channel/0029VbD72j97oQhZ0X5eKT0V',
+                                    '_blank',
+                                )
+                            }
+                        >
+                            <Whatsapp className="size-3.5" />
+                            <span>WhatsApp</span>
+                        </MenuItem>
+                    </MenuContent>
+                </Menu>
             </div>
         </aside>
     )

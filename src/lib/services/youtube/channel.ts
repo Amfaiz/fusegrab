@@ -1,3 +1,4 @@
+import type { SessionLogger } from '../logger/service'
 import type {
     ActiveDownloadState,
     ChannelProgressEvent,
@@ -8,21 +9,22 @@ import type {
 import type { BrowserWindow } from 'electron'
 
 import ffmpegPath from 'ffmpeg-static'
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 
 import { getSessionLogger } from '../logger/service'
 
-import {
-    ensureFfmpegBinary,
-    ensureYtDlpBinary,
-    getAntiRateLimitArgs,
-    getJsRuntimeArgs,
-    spawnOptions,
-} from './binary'
+import { ensureFfmpegBinary, ensureYtDlpBinary, spawnOptions } from './binary'
 import { scrapeChannelWithBrowser } from './channel-scraper'
 import { buildVideoFormatSelector } from './format'
+import {
+    buildFailureMessage,
+    buildYtDlpAttempts,
+    runJsonAttempts,
+    shouldContinueToNextAttempt,
+    shouldRetryWithAlternative,
+} from './retry'
 
 export async function getYoutubeUrlType(
     url: string,
@@ -52,31 +54,20 @@ export async function getYoutubeUrlType(
         return 'channel'
     }
 
-    const ytDlpPath = await ensureYtDlpBinary()
+    const [ytDlpPath, attempts] = await Promise.all([
+        ensureYtDlpBinary(),
+        buildYtDlpAttempts(),
+    ])
     try {
-        const antiRateLimitArgs = await getAntiRateLimitArgs()
-        const jsRuntimeArgs = await getJsRuntimeArgs()
-        const stdout = await new Promise<string>((resolve, reject) => {
-            execFile(
-                ytDlpPath,
-                [
-                    ...antiRateLimitArgs,
-                    ...jsRuntimeArgs,
-                    '--dump-single-json',
-                    '--flat-playlist',
-                    '--playlist-start',
-                    '1',
-                    '--playlist-end',
-                    '1',
-                    cleanUrl,
-                ],
-                { maxBuffer: 50 * 1024 * 1024 },
-                (err, out) => {
-                    if (err) return reject(err)
-                    resolve(out)
-                },
-            )
-        })
+        const stdout = await runJsonAttempts(ytDlpPath, attempts, [
+            '--dump-single-json',
+            '--flat-playlist',
+            '--playlist-start',
+            '1',
+            '--playlist-end',
+            '1',
+            cleanUrl,
+        ])
 
         const data = JSON.parse(stdout)
         if (
@@ -146,39 +137,22 @@ async function getChannelPageViaYtDlp(
     page: number,
     limit: number,
 ): Promise<YoutubeChannelInfo> {
-    const ytDlpPath = await ensureYtDlpBinary()
     const start = (page - 1) * limit + 1
     const end = page * limit
 
-    const antiRateLimitArgs = await getAntiRateLimitArgs()
-    const jsRuntimeArgs = await getJsRuntimeArgs()
-    const stdout = await new Promise<string>((resolve, reject) => {
-        execFile(
-            ytDlpPath,
-            [
-                ...antiRateLimitArgs,
-                ...jsRuntimeArgs,
-                '--dump-single-json',
-                '--flat-playlist',
-                '--playlist-start',
-                String(start),
-                '--playlist-end',
-                String(end),
-                url,
-            ],
-            { maxBuffer: 50 * 1024 * 1024 },
-            (err, out) => {
-                if (err)
-                    return reject(
-                        new Error(
-                            err.message ||
-                                'Failed to fetch YouTube channel info',
-                        ),
-                    )
-                resolve(out)
-            },
-        )
-    })
+    const [ytDlpPath, attempts] = await Promise.all([
+        ensureYtDlpBinary(),
+        buildYtDlpAttempts(),
+    ])
+    const stdout = await runJsonAttempts(ytDlpPath, attempts, [
+        '--dump-single-json',
+        '--flat-playlist',
+        '--playlist-start',
+        String(start),
+        '--playlist-end',
+        String(end),
+        url,
+    ])
 
     const data = JSON.parse(stdout)
     const rawEntries = Array.isArray(data.entries) ? data.entries : []
@@ -229,91 +203,41 @@ async function getChannelPageViaYtDlp(
     }
 }
 
-export async function downloadYoutubeChannel(
-    win: BrowserWindow | null,
-    options: DownloadChannelOptions,
-    onProcessStart: (proc: any) => void,
-    onProcessEnd: () => void,
-    updateState: (patch: Partial<ActiveDownloadState>) => void,
-    startPower: () => void,
-    stopPower: () => void,
+interface ChannelAttemptDeps {
+    ytDlpPath: string
+    args: string[]
+    win: BrowserWindow | null
+    cleanUrl: string
+    logger: SessionLogger
+    onProcessStart: (proc: any) => void
+    onProcessEnd: () => void
+    updateState: (patch: Partial<ActiveDownloadState>) => void
+    startPower: () => void
+    stopPower: () => void
+}
+
+/**
+ * One yt-dlp spawn for a channel/playlist download. Per-item progress is
+ * streamed to the renderer; the promise resolves on exit code 0 or rejects
+ * with a message derived from yt-dlp's stderr.
+ */
+async function runChannelDownloadAttempt(
+    deps: ChannelAttemptDeps,
 ): Promise<void> {
-    const { channelUrl, saveDir, qualityHeight, isAudioOnly, rootDownloadDir } =
-        options
-    const logDir = rootDownloadDir || path.dirname(saveDir)
-    const logger = getSessionLogger()
-    logger.setDownloadRoot(logDir)
+    const {
+        ytDlpPath,
+        args,
+        win,
+        cleanUrl,
+        logger,
+        onProcessStart,
+        onProcessEnd,
+        updateState,
+        startPower,
+        stopPower,
+    } = deps
 
-    const downloadLabel = `Channel/Playlist Download — ${path.basename(saveDir)}`
-    logger.startDownload(downloadLabel, {
-        channelUrl,
-        saveDir,
-        qualityHeight,
-        isAudioOnly,
-    })
-
-    const cleanUrl = channelUrl.trim()
-    if (!existsSync(saveDir)) {
-        logger.info(`Creating target save directory: ${saveDir}`)
-        mkdirSync(saveDir, { recursive: true })
-    }
-
-    logger.info('Step 1/3: Resolving yt-dlp binary...')
-    const ytDlpPath = await ensureYtDlpBinary(false, logger)
-    logger.info(`yt-dlp binary located at: ${ytDlpPath}`)
-
-    logger.info('Step 2/3: Fetching anti-rate-limit parameters...')
-    const antiRateLimitArgs = await getAntiRateLimitArgs(win, logger)
-    logger.info(
-        `Anti-rate-limit arguments: ${JSON.stringify(antiRateLimitArgs)}`,
-    )
-
-    const resolvedFfmpegPath = await ensureFfmpegBinary(ffmpegPath, logger)
-    const canMerge = Boolean(resolvedFfmpegPath)
-
-    const args: string[] = [
-        ...antiRateLimitArgs,
-        ...(await getJsRuntimeArgs(logger)),
-        '--newline',
-        '--no-mtime',
-        '--sleep-requests',
-        '1',
-        '--sleep-interval',
-        '2',
-        '--max-sleep-interval',
-        '5',
-    ]
-
-    if (resolvedFfmpegPath) {
-        args.push('--ffmpeg-location', resolvedFfmpegPath)
-        // Only meaningful with ffmpeg present; without it yt-dlp cannot mux.
-        args.push('--merge-output-format', 'mp4')
-        logger.info(`ffmpeg binary located at: ${resolvedFfmpegPath}`)
-    } else {
-        logger.warn(
-            'ffmpeg binary not found. Falling back to a single pre-merged format; quality may be lower than requested.',
-        )
-    }
-
-    if (isAudioOnly) {
-        args.push('-f', 'bestaudio')
-        if (canMerge) {
-            // Transcoding to mp3 is an ffmpeg postprocessor.
-            args.push('-x', '--audio-format', 'mp3')
-        }
-    } else if (qualityHeight) {
-        args.push('-f', buildVideoFormatSelector(qualityHeight, canMerge))
-    } else {
-        args.push('-f', buildVideoFormatSelector(undefined, canMerge))
-    }
-
-    const outputTemplate = path.join(saveDir, '%(title)s [%(id)s].%(ext)s')
-    args.push('-o', outputTemplate, cleanUrl)
-
-    logger.info(
-        `Step 3/3: Spawning yt-dlp process with output template: ${outputTemplate}`,
-    )
-    logger.info(`Full yt-dlp arguments: ${args.join(' ')}`)
+    logger.info(`Spawning yt-dlp child process with: ${args.join(' ')}`)
 
     startPower()
     updateState({
@@ -337,6 +261,7 @@ export async function downloadYoutubeChannel(
     let totalItems = 0
     let videoTitle = ''
     const stderrLines: string[] = []
+    const rawStderrLines: string[] = []
 
     return new Promise((resolve, reject) => {
         proc.stdout.on('data', (data: Buffer) => {
@@ -391,6 +316,7 @@ export async function downloadYoutubeChannel(
         proc.stderr.on('data', (data: Buffer) => {
             const str = data.toString()
             logger.logStderrLine(str)
+            rawStderrLines.push(str.trim())
             if (!str.includes('WARNING:')) {
                 stderrLines.push(str.trim())
             }
@@ -401,7 +327,6 @@ export async function downloadYoutubeChannel(
             onProcessEnd()
             updateState({ isDownloading: false })
             logger.error('yt-dlp channel process encountered error', err)
-            logger.endDownload(downloadLabel, false)
             reject(err)
         })
 
@@ -412,7 +337,6 @@ export async function downloadYoutubeChannel(
             logger.info(`yt-dlp process exited with code ${code}`)
             if (code === 0) {
                 logger.info('Channel download successfully completed.')
-                logger.endDownload(downloadLabel, true)
                 if (win && !win.isDestroyed()) {
                     win.webContents.send('youtube:channel-progress', {
                         currentItem: totalItems || currentItem,
@@ -424,14 +348,135 @@ export async function downloadYoutubeChannel(
                 }
                 resolve()
             } else {
-                const errMsg =
-                    stderrLines.length > 0
-                        ? stderrLines.slice(-3).join(' ')
-                        : `Channel download exited with code ${code}`
+                const errMsg = buildFailureMessage(
+                    stderrLines,
+                    rawStderrLines,
+                    code,
+                )
                 logger.error(`Channel download failed: ${errMsg}`)
-                logger.endDownload(downloadLabel, false)
                 reject(new Error(errMsg))
             }
         })
     })
+}
+
+export async function downloadYoutubeChannel(
+    win: BrowserWindow | null,
+    options: DownloadChannelOptions,
+    onProcessStart: (proc: any) => void,
+    onProcessEnd: () => void,
+    updateState: (patch: Partial<ActiveDownloadState>) => void,
+    startPower: () => void,
+    stopPower: () => void,
+): Promise<void> {
+    const { channelUrl, saveDir, qualityHeight, isAudioOnly, rootDownloadDir } =
+        options
+    const logDir = rootDownloadDir || path.dirname(saveDir)
+    const logger = getSessionLogger()
+    logger.setDownloadRoot(logDir)
+
+    const downloadLabel = `Channel/Playlist Download — ${path.basename(saveDir)}`
+    logger.startDownload(downloadLabel, {
+        channelUrl,
+        saveDir,
+        qualityHeight,
+        isAudioOnly,
+    })
+
+    const cleanUrl = channelUrl.trim()
+    if (!existsSync(saveDir)) {
+        logger.info(`Creating target save directory: ${saveDir}`)
+        mkdirSync(saveDir, { recursive: true })
+    }
+
+    logger.info(
+        'Step 1/3: Resolving yt-dlp binary, ffmpeg, and download strategies...',
+    )
+    const [ytDlpPath, resolvedFfmpegPath, attempts] = await Promise.all([
+        ensureYtDlpBinary(false, logger),
+        ensureFfmpegBinary(ffmpegPath, logger),
+        buildYtDlpAttempts(win, logger),
+    ])
+    logger.info(`yt-dlp binary located at: ${ytDlpPath}`)
+    logger.info(`Strategies: ${attempts.map((a) => a.label).join(' → ')}`)
+    const canMerge = Boolean(resolvedFfmpegPath)
+
+    const baseArgs: string[] = [
+        '--newline',
+        '--no-mtime',
+        '--sleep-requests',
+        '1',
+        '--sleep-interval',
+        '2',
+        '--max-sleep-interval',
+        '5',
+    ]
+
+    if (resolvedFfmpegPath) {
+        baseArgs.push('--ffmpeg-location', resolvedFfmpegPath)
+        // Only meaningful with ffmpeg present; without it yt-dlp cannot mux.
+        baseArgs.push('--merge-output-format', 'mp4')
+        logger.info(`ffmpeg binary located at: ${resolvedFfmpegPath}`)
+    } else {
+        logger.warn(
+            'ffmpeg binary not found. Falling back to a single pre-merged format; quality may be lower than requested.',
+        )
+    }
+
+    if (isAudioOnly) {
+        baseArgs.push('-f', 'bestaudio')
+        if (canMerge) {
+            // Transcoding to mp3 is an ffmpeg postprocessor.
+            baseArgs.push('-x', '--audio-format', 'mp3')
+        }
+    } else if (qualityHeight) {
+        baseArgs.push('-f', buildVideoFormatSelector(qualityHeight, canMerge))
+    } else {
+        baseArgs.push('-f', buildVideoFormatSelector(undefined, canMerge))
+    }
+
+    const outputTemplate = path.join(saveDir, '%(title)s [%(id)s].%(ext)s')
+    baseArgs.push('-o', outputTemplate, cleanUrl)
+
+    logger.info(`Output template: ${outputTemplate}`)
+
+    let lastError: Error | null = null
+    let botCheckError: Error | null = null
+
+    for (let i = 0; i < attempts.length; i++) {
+        const attempt = attempts[i]
+        logger.info(
+            `Download attempt ${i + 1}/${attempts.length}: ${attempt.label}`,
+        )
+        try {
+            await runChannelDownloadAttempt({
+                ytDlpPath,
+                args: [...attempt.args, ...baseArgs],
+                win,
+                cleanUrl,
+                logger,
+                onProcessStart,
+                onProcessEnd,
+                updateState,
+                startPower,
+                stopPower,
+            })
+            logger.endDownload(downloadLabel, true)
+            return
+        } catch (err: any) {
+            const error = err instanceof Error ? err : new Error(String(err))
+            lastError = error
+            logger.warn(`Attempt "${attempt.label}" failed: ${error.message}`)
+            if (!botCheckError && shouldRetryWithAlternative(error.message)) {
+                botCheckError = error
+            }
+            if (!shouldContinueToNextAttempt(error.message)) {
+                logger.endDownload(downloadLabel, false)
+                throw botCheckError ?? error
+            }
+        }
+    }
+
+    logger.endDownload(downloadLabel, false)
+    throw botCheckError ?? lastError ?? new Error('Channel download failed')
 }

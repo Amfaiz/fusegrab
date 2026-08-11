@@ -2,11 +2,10 @@ import type { DownloadItem } from './types'
 
 import { useEffect, useRef, useState } from 'react'
 
+import { AppBrand } from '#/components/app-brand'
 import { Search } from '#/components/icons'
 import { InputField, InputIcon, InputRoot } from '#/components/ui/input'
 import { useWindowDrag } from '#/hooks/use-window-drag'
-
-import appLogo from '../../../../assets/icon.rounded.png'
 
 import { AddUrlModal } from './add-dialog'
 import { FileMissingDialog } from './file-missing-dialog'
@@ -18,8 +17,14 @@ import {
     stopItemById,
 } from './handlers'
 import { DownloadOptionsModal } from './options-dialog'
-import { applyDownloadFailure, selectNextDownload } from './retry'
+import {
+    applyDownloadFailure,
+    isBotCheckError,
+    selectNextDownload,
+} from './retry'
 import { DownloaderSidebar } from './sidebar'
+import { SignInScreen } from './sign-in-screen'
+import { SplashScreen } from './splash-screen'
 import { DownloaderTable } from './table'
 import { DownloaderToolbar } from './toolbar'
 import { formatDate, sanitizeFilename } from './types'
@@ -85,6 +90,25 @@ export function YoutubeDownloader() {
     const [inputUrl, setInputUrl] = useState('')
     const [loadingInfo, setLoadingInfo] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [signedIn, setSignedIn] = useState<boolean | null>(null)
+    const [accountInfo, setAccountInfo] = useState<{
+        name: string
+        avatarUrl: string | null
+        email: string | null
+    } | null>(null)
+    const [signInDismissed, setSignInDismissed] = useState(false)
+    const [signInStatus, setSignInStatus] = useState<
+        'idle' | 'opened' | 'signed-in' | 'closed' | 'signed-out'
+    >('idle')
+    // The Google sign-in URL to load in the embedded webview, set on 'opened'.
+    const [signInUrl, setSignInUrl] = useState<string | null>(null)
+    // Keep the splash up for a moment even when the session check resolves
+    // instantly, so startup never flashes the wrong screen.
+    const [splashElapsed, setSplashElapsed] = useState(false)
+    useEffect(() => {
+        const timer = setTimeout(() => setSplashElapsed(true), 2500)
+        return () => clearTimeout(timer)
+    }, [])
     const [downloadDir, setDownloadDir] = useState<string>('')
     const downloadDirRef = useRef('')
     const [isDownloading, setIsDownloading] = useState(false)
@@ -305,6 +329,87 @@ export function YoutubeDownloader() {
             /(?:watch\?v=|youtu\.be\/|\/shorts\/)([a-zA-Z0-9_-]{11})/,
         )
         return match ? match[1] : null
+    }
+
+    // Sign-in: the user logs into YouTube once in their real browser, the app
+    // imports the session into the yt-dlp jar, and 'signed-in' is emitted when
+    // it lands. While no session exists the whole app is gated behind
+    // SignInScreen. Account info is pre-fetched in parallel here (during the
+    // splash) so the sidebar button is ready the moment the splash lifts.
+    useEffect(() => {
+        let cancelled = false
+        const refresh = async () => {
+            const [isSignedIn, account] = await Promise.all([
+                window.api.youtube.getSignInState(),
+                window.api.youtube.getAccountInfo(),
+            ])
+            if (cancelled) return
+            setSignedIn(isSignedIn)
+            setAccountInfo(account)
+        }
+        void refresh()
+
+        const off = window.api.youtube.onSignInState((state) => {
+            setSignInStatus(state?.status || 'idle')
+            if (state?.status === 'opened') {
+                // Re-show the gate even if the user previously skipped it —
+                // the embedded sign-in webview only renders inside it, so
+                // dismissing it once would otherwise make the sidebar's
+                // "Sign in" button a no-op forever.
+                setSignInDismissed(false)
+                setSignInUrl(state.url ?? null)
+            } else if (state?.status === 'signed-in') {
+                setSignedIn(true)
+                setSignInUrl(null)
+                void refresh()
+                // The jar now carries a logged-in session: clear a bot-check
+                // error in the Add dialog, and reset any bot-check failures so
+                // Retry Now starts from a fresh budget.
+                setError((prev) =>
+                    prev && isBotCheckError(prev) ? null : prev,
+                )
+                setItems((prev) =>
+                    prev.map((i) =>
+                        i.statusStage && isBotCheckError(i.statusStage)
+                            ? { ...i, retryCount: undefined }
+                            : i,
+                    ),
+                )
+            } else if (state?.status === 'signed-out') {
+                // Explicit sign-out — re-read so the gate reappears.
+                setSignInUrl(null)
+                setSignInDismissed(false)
+                void refresh()
+            } else if (state?.status === 'closed') {
+                // Poll timed out without a session — drop the webview and
+                // re-read the persisted session so the gate reflects reality.
+                setSignInUrl(null)
+                void refresh()
+            }
+        })
+        return () => {
+            cancelled = true
+            off()
+        }
+    }, [])
+
+    const handleOpenSignIn = () => {
+        setSignInUrl(null)
+        void window.api.youtube.openSignIn()
+    }
+
+    const handleCancelSignIn = () => {
+        // Stop the main-process poll too, so the gate's button leaves its
+        // "Opening sign-in…" state and a later re-open starts clean.
+        setSignInUrl(null)
+        setSignInStatus('idle')
+        void window.api.youtube.cancelSignIn()
+    }
+
+    // The 'signed-out' event from the main process re-reads the session and
+    // drops the account info, so the sidebar reverts to the sign-in button.
+    const handleSignOut = () => {
+        void window.api.youtube.signOut()
     }
 
     const handleAddUrl = async () => {
@@ -850,18 +955,26 @@ export function YoutubeDownloader() {
         </InputRoot>
     )
 
-    const brand = (
-        <div className="flex items-center gap-2">
-            <img
-                src={appLogo}
-                alt="FuseGrab"
-                className="h-5 w-5 rounded-xs object-contain shadow-xs"
+    const brand = <AppBrand />
+
+    if (signedIn === null || !splashElapsed) {
+        // Session check still in flight, or the splash's minimum display time
+        // has not passed yet.
+        return <SplashScreen />
+    }
+
+    if (signedIn !== true && !signInDismissed) {
+        return (
+            <SignInScreen
+                checking={false}
+                status={signInStatus}
+                url={signInUrl}
+                onSignIn={handleOpenSignIn}
+                onCancel={handleCancelSignIn}
+                onSkip={() => setSignInDismissed(true)}
             />
-            <span className="text-foreground text-xs font-semibold tracking-wide">
-                FuseGrab
-            </span>
-        </div>
-    )
+        )
+    }
 
     return (
         <div className="bg-background text-foreground flex h-full w-full flex-col overflow-hidden font-sans select-none">
@@ -921,6 +1034,10 @@ export function YoutubeDownloader() {
                     items={items}
                     activeFilter={activeFilter}
                     setActiveFilter={setActiveFilter}
+                    onSignIn={handleOpenSignIn}
+                    onSignOut={handleSignOut}
+                    signedIn={signedIn === true}
+                    accountInfo={accountInfo}
                 />
 
                 <main className="bg-background flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -938,6 +1055,7 @@ export function YoutubeDownloader() {
                         onStopItem={handleStopItem}
                         onDeleteItem={handleDeleteItem}
                         onOpenFolder={handleOpenFolder}
+                        onSignIn={handleOpenSignIn}
                         isFetchingVideos={isFetchingVideos}
                     />
 
@@ -957,6 +1075,8 @@ export function YoutubeDownloader() {
                 setInputUrl={setInputUrl}
                 loadingInfo={loadingInfo}
                 error={error}
+                signInStatus={signInStatus}
+                onSignIn={handleOpenSignIn}
                 onSubmit={handleAddUrl}
             />
 

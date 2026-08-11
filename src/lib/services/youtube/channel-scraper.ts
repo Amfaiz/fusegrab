@@ -1,6 +1,8 @@
 import type { YoutubeChannelVideoItem } from './types'
 import type { BrowserWindow } from 'electron'
 
+import { getPlatformUserAgent } from './binary'
+
 // Scraping runs in an offscreen BrowserWindow. Those count towards Electron's
 // window list, so one left open stops `window-all-closed` from ever firing and
 // the app never quits. Track them so shutdown can tear them all down.
@@ -341,9 +343,7 @@ export async function scrapeChannelWithBrowser(
     trackScraperWindow(win)
 
     win.webContents.setAudioMuted(true)
-    win.webContents.setUserAgent(
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    )
+    win.webContents.setUserAgent(getPlatformUserAgent())
 
     try {
         await win.loadURL(targetUrl)

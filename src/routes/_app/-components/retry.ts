@@ -3,6 +3,14 @@ import type { DownloadItem } from './types'
 import { MAX_RETRY_ATTEMPTS } from './types'
 
 /**
+ * True when the failure is YouTube's bot wall rather than a dead URL. Used to
+ * offer the in-app sign-in action where the error is surfaced.
+ */
+export function isBotCheckError(message: string): boolean {
+    return /Sign in to confirm you're not a bot/i.test(message)
+}
+
+/**
  * Queue-advance policy, kept free of React state so it can be tested directly.
  *
  * Ordinary queued work always goes first. Only once the queue has drained do

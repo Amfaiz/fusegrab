@@ -33,6 +33,8 @@ export type {
 } from './types'
 
 export { destroyScraperWindows } from './channel-scraper'
+export { prewarmYoutubeBinaries } from './binary'
+export { openYoutubeSignIn } from './sign-in'
 
 let activeChildProcess: ChildProcess | null = null
 let powerBlockerId: number | null = null
@@ -123,8 +125,9 @@ export async function getYoutubeChannelPage(
 
 export async function getYoutubeVideoInfo(
     url: string,
+    win?: BrowserWindow | null,
 ): Promise<YoutubeVideoInfo> {
-    return getVideoInfoImpl(url)
+    return getVideoInfoImpl(url, win)
 }
 
 export async function downloadYoutubeVideo(
