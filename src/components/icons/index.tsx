@@ -2,6 +2,7 @@ import type { HugeiconsIconProps } from '@hugeicons/react'
 
 import {
     Add01Icon,
+    AnonymousIcon,
     ArrowDown01Icon,
     Cancel01Icon,
     Delete02Icon,
@@ -38,6 +39,7 @@ function makeIcon(icon: HugeiconsIconProps['icon']): IconComponent {
 
 export const Plus = makeIcon(Add01Icon)
 export const Check = makeIcon(Tick02Icon)
+export const Anonymous = makeIcon(AnonymousIcon)
 export const ChevronDownIcon = makeIcon(ArrowDown01Icon)
 export const Download = makeIcon(Download04Icon)
 export const ExternalLink = makeIcon(LinkSquare02Icon)

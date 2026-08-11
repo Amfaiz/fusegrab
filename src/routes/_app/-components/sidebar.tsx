@@ -3,7 +3,7 @@ import type { DownloadItem } from './types'
 import { useState } from 'react'
 
 import {
-    Check,
+    Anonymous,
     Folder,
     FolderOpen,
     Globe,
@@ -81,10 +81,10 @@ function AccountSection({
                         className="size-4 shrink-0 rounded-full"
                     />
                 ) : (
-                    <Check className="text-primary size-3.5 shrink-0" />
+                    <Anonymous className="text-primary size-3.5 shrink-0" />
                 )}
                 <span className="truncate">
-                    {accountInfo?.name || 'Switch account'}
+                    {accountInfo?.name || 'Anonymous'}
                 </span>
             </MenuTrigger>
             <MenuContent sideOffset={4} align="start" className="w-52">
