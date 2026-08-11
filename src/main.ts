@@ -76,6 +76,11 @@ const __dirname = path.dirname(__filename)
 
 const isMac = process.platform === 'darwin'
 
+// Set when the user manually triggers an update check from the renderer. The
+// startup auto-check skips when this is set, so it can't race a download the
+// user started off their own check.
+let userTriggeredUpdateCheck = false
+
 // In development the Vite dev server occasionally returns a truncated response
 // (e.g. when a dependency re-optimization interrupts an in-flight request).
 // Source modules are served `Cache-Control: no-cache`, which means *store and
@@ -230,8 +235,11 @@ app.on('ready', async () => {
     createWindow()
 
     // Check for updates a few seconds after launch so it doesn't compete with
-    // startup work. The renderer can also trigger a manual re-check.
+    // startup work. The renderer can also trigger a manual re-check. If the
+    // user already checked manually, the auto check is skipped so it can't
+    // race a download the user started off that check.
     setTimeout(() => {
+        if (userTriggeredUpdateCheck) return
         checkForUpdate().catch((err) => {
             console.error('Update check failed:', err)
         })
@@ -359,7 +367,10 @@ handle('files:delete-partial', (_event, filePath: string) =>
 )
 
 handle('updater:get-state', () => getUpdateState())
-handle('updater:check', () => checkForUpdate())
+handle('updater:check', () => {
+    userTriggeredUpdateCheck = true
+    return checkForUpdate()
+})
 handle('updater:download', () => downloadUpdate())
 handle('updater:install', () => quitAndInstall())
 handle('app:get-version', () => app.getVersion())

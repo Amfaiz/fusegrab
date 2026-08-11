@@ -82,6 +82,11 @@ export async function cleanupStaleInstallers(): Promise<void> {
 }
 
 export async function checkForUpdate(): Promise<UpdateState> {
+    // Never clobber an in-flight or finished download: any check that runs
+    // while one is active just returns the current state.
+    if (state.status === 'downloading' || state.status === 'downloaded') {
+        return state
+    }
     if (process.platform !== 'win32' && process.platform !== 'darwin') {
         clearSelectedAsset()
         setState({ status: 'idle', assetKind: null })
@@ -137,12 +142,6 @@ export async function checkForUpdate(): Promise<UpdateState> {
         }
 
         const stripped = latest.replace(/^v/i, '')
-        if (
-            state.version === stripped &&
-            (state.status === 'downloading' || state.status === 'downloaded')
-        ) {
-            return state
-        }
 
         const match = pickAsset(release.assets, process.platform, process.arch)
         if (!match) {
