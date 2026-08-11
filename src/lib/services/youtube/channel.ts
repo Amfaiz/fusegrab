@@ -18,6 +18,7 @@ import { getSessionLogger } from '../logger/service'
 import { ensureFfmpegBinary, ensureYtDlpBinary, spawnOptions } from './binary'
 import { scrapeChannelWithBrowser } from './channel-scraper'
 import { buildVideoFormatSelector } from './format'
+import { isHlsStartGlitch } from './progress'
 import {
     buildFailureMessage,
     buildYtDlpAttempts,
@@ -294,7 +295,7 @@ async function runChannelDownloadAttempt(
                     line.match(/\[#\w+.*?\s+([\d.]+)%/)
                 const percentMatch = ytDlpPercent || aria2Percent
 
-                if (percentMatch) {
+                if (percentMatch && !isHlsStartGlitch(line)) {
                     const percent = parseFloat(percentMatch[1])
                     if (!isNaN(percent)) {
                         const cp: ChannelProgressEvent = {

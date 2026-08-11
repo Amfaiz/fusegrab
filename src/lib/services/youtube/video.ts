@@ -18,6 +18,13 @@ import { getSessionLogger } from '../logger/service'
 import { ensureFfmpegBinary, ensureYtDlpBinary, spawnOptions } from './binary'
 import { buildVideoFormatSelector } from './format'
 import {
+    buildStreamWeights,
+    computeWeightedPercent,
+    createStartPercentGuard,
+    parseStreamCount,
+    parseYtDlpPercent,
+} from './progress'
+import {
     buildFailureMessage,
     buildYtDlpAttempts,
     runJsonAttempts,
@@ -166,45 +173,19 @@ async function runVideoDownloadAttempt(
     const rawStderrLines: string[] = []
 
     // Weighted multi-stream progress tracking
-    // Video+audio downloads report two separate 0-100% streams.
-    // We weight them: stream 1 (video) = 0-80%, stream 2 (audio) = 80-95%,
-    // merge/finalize = 95-100%. For audio-only: single stream = 0-100%.
+    // Video+audio downloads report two separate 0-100% streams. We weight
+    // them: stream 1 (video) = 0-80%, stream 2 (audio) = 80-95%,
+    // merge/finalize = 95-100%. yt-dlp announces the format list
+    // (`[info] ... Downloading N format(s): 395+251`) before downloading;
+    // a `+` pair is two streams, a single combined format — which happens
+    // with the tv-downgraded-player HLS streams — is one stream that gets
+    // the whole 0-100% bar.
     let currentStream = 0
     let lastRawPercent = 0
     let maxEmittedPercent = 0
-
-    const streamWeights = isAudioOnly
-        ? [{ start: 0, end: 100 }]
-        : [
-              { start: 0, end: 80 }, // video stream
-              { start: 80, end: 95 }, // audio stream
-          ]
-
-    const computeWeightedPercent = (rawPercent: number): number => {
-        const streamIndex = Math.min(currentStream, streamWeights.length - 1)
-        const weight = streamWeights[streamIndex]
-        const mapped =
-            weight.start + (rawPercent / 100) * (weight.end - weight.start)
-        return Math.max(maxEmittedPercent, Math.min(95, mapped))
-    }
-
-    function parsePercentFromLine(line: string): number | null {
-        const ytDlpMatch = line.match(/\[download\]\s+([\d.]+)%/)
-        if (ytDlpMatch) {
-            const val = parseFloat(ytDlpMatch[1])
-            return isNaN(val) ? null : val
-        }
-
-        const aria2Match =
-            line.match(/\[#\w+.*?\(([\d.]+)%\)/) ||
-            line.match(/\[#\w+.*?\s+([\d.]+)%/)
-        if (aria2Match) {
-            const val = parseFloat(aria2Match[1])
-            return isNaN(val) ? null : val
-        }
-
-        return null
-    }
+    let streamCountKnown = false
+    let streamWeights = buildStreamWeights(isAudioOnly ? 1 : 2, isAudioOnly)
+    const startPercentGuard = createStartPercentGuard()
 
     return new Promise((resolve, reject) => {
         proc.stdout.on('data', (data: Buffer) => {
@@ -212,12 +193,32 @@ async function runVideoDownloadAttempt(
             for (const line of lines) {
                 logger.logStdoutLine(line)
 
+                const streamCount = parseStreamCount(line)
+                if (streamCount !== null) {
+                    streamWeights = buildStreamWeights(
+                        streamCount,
+                        isAudioOnly,
+                    )
+                    streamCountKnown = true
+                }
+
+                // HLS formats download as one combined stream, and the
+                // format-count line is often missing for them. Without this,
+                // the default two-stream weights would cap the bar at 80%.
+                if (
+                    !streamCountKnown &&
+                    line.includes('[hlsnative] Total fragments:')
+                ) {
+                    streamWeights = buildStreamWeights(1, isAudioOnly)
+                }
+
                 // Detect stream switch via "Destination:" line
                 if (line.includes('[download] Destination:')) {
                     if (currentStream > 0 || lastRawPercent > 50) {
                         currentStream++
                     }
                     lastRawPercent = 0
+                    startPercentGuard.reset()
                     continue
                 }
 
@@ -241,7 +242,7 @@ async function runVideoDownloadAttempt(
                     continue
                 }
 
-                const rawPercent = parsePercentFromLine(line)
+                const rawPercent = parseYtDlpPercent(line)
                 if (rawPercent !== null) {
                     // Detect stream switch via large percent drop
                     if (
@@ -249,10 +250,20 @@ async function runVideoDownloadAttempt(
                         lastRawPercent > 50
                     ) {
                         currentStream++
+                        startPercentGuard.reset()
                     }
                     lastRawPercent = rawPercent
 
-                    const weightedPercent = computeWeightedPercent(rawPercent)
+                    // Ignore a near-100% value until real progress has been
+                    // seen in this stream (hlsnative's pre-fetch placeholder).
+                    if (!startPercentGuard.accept(rawPercent)) continue
+
+                    const weightedPercent = computeWeightedPercent(
+                        rawPercent,
+                        currentStream,
+                        streamWeights,
+                        maxEmittedPercent,
+                    )
                     maxEmittedPercent = weightedPercent
 
                     const p = {
