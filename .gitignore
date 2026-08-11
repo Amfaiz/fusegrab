@@ -16,5 +16,6 @@ todos.json
 scratch
 .claude/**/*.lock
 build/ffmpeg-cache
+build/deno-cache
 .pnpm-store
 !out/RELEASE_NOTES.md
