@@ -329,6 +329,9 @@ export function DownloaderTable({
                                                 <SelectItem value="Audio Only">
                                                     Audio Only
                                                 </SelectItem>
+                                                <SelectItem value="Thumbnail">
+                                                    Thumbnail
+                                                </SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </td>

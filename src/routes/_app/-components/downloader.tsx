@@ -121,6 +121,16 @@ export function YoutubeDownloader() {
     const [defaultQuality, setDefaultQuality] = useState<string>(() => {
         return localStorage.getItem('yt_default_quality') || 'Best'
     })
+    const [downloadThumbnails, setDownloadThumbnails] = useState<boolean>(
+        () => localStorage.getItem('yt_download_thumbnails') === '1',
+    )
+    const downloadThumbnailsRef = useRef(downloadThumbnails)
+
+    const handleDownloadThumbnailsChange = (enabled: boolean) => {
+        setDownloadThumbnails(enabled)
+        downloadThumbnailsRef.current = enabled
+        localStorage.setItem('yt_download_thumbnails', enabled ? '1' : '0')
+    }
 
     const isDownloadingRef = useRef(false)
     // Each backend download is assigned a run id. Cancelling a download invalidates
@@ -660,7 +670,10 @@ export function YoutubeDownloader() {
             if (item.type === 'video') {
                 const sanitized = sanitizeFilename(item.name)
                 const isAudio = item.quality?.toLowerCase().includes('audio')
-                const ext = isAudio ? 'mp3' : 'mp4'
+                const isThumbnail = item.quality
+                    ?.toLowerCase()
+                    .includes('thumbnail')
+                const ext = isAudio ? 'mp3' : isThumbnail ? 'jpg' : 'mp4'
 
                 let savePath: string
                 if (item.isSingleUrl) {
@@ -683,12 +696,21 @@ export function YoutubeDownloader() {
                       ? undefined
                       : parseInt(item.quality || '', 10) || undefined
 
-                await window.api.youtube.download({
-                    url: item.url,
-                    savePath,
-                    height: heightVal,
-                    rootDownloadDir: targetDir,
-                })
+                if (isThumbnail) {
+                    await window.api.youtube.downloadThumbnail({
+                        url: item.url,
+                        savePath,
+                        rootDownloadDir: targetDir,
+                    })
+                } else {
+                    await window.api.youtube.download({
+                        url: item.url,
+                        savePath,
+                        height: heightVal,
+                        downloadThumbnail: downloadThumbnailsRef.current,
+                        rootDownloadDir: targetDir,
+                    })
+                }
 
                 if (activeRunIdRef.current === runId) {
                     setItems((prev) =>
@@ -711,6 +733,9 @@ export function YoutubeDownloader() {
                 const saveDir = `${targetDir.replace(/\/$/, '')}/${sanitized}`
 
                 const isAudio = item.quality?.toLowerCase().includes('audio')
+                const isThumbnail = item.quality
+                    ?.toLowerCase()
+                    .includes('thumbnail')
                 const isBest =
                     !item.quality ||
                     item.quality === 'Best Quality' ||
@@ -726,6 +751,8 @@ export function YoutubeDownloader() {
                     saveDir,
                     qualityHeight: heightVal,
                     isAudioOnly: isAudio,
+                    isThumbnail,
+                    downloadThumbnail: downloadThumbnailsRef.current,
                     rootDownloadDir: targetDir,
                 })
 
@@ -1087,6 +1114,8 @@ export function YoutubeDownloader() {
                 onSelectFolder={handleSelectFolder}
                 defaultQuality={defaultQuality}
                 onDefaultQualityChange={handleDefaultQualityChange}
+                downloadThumbnails={downloadThumbnails}
+                onDownloadThumbnailsChange={handleDownloadThumbnailsChange}
             />
 
             <FileMissingDialog

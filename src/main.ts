@@ -37,6 +37,7 @@ import {
     cancelYoutubeDownload,
     destroyScraperWindows,
     downloadYoutubeChannel,
+    downloadYoutubeThumbnail,
     downloadYoutubeVideo,
     getActiveDownloadState,
     getYoutubeChannelPage,
@@ -394,6 +395,12 @@ handle('youtube:download', (event, options) =>
 )
 handle('youtube:download-channel', (event, options) =>
     downloadYoutubeChannel(
+        BrowserWindow.fromWebContents(event.sender),
+        options,
+    ),
+)
+handle('youtube:download-thumbnail', (event, options) =>
+    downloadYoutubeThumbnail(
         BrowserWindow.fromWebContents(event.sender),
         options,
     ),

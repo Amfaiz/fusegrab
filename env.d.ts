@@ -37,6 +37,9 @@ declare global {
                 download: (
                     options: DownloadOptions,
                 ) => Promise<{ filePath: string; size: number }>
+                downloadThumbnail: (
+                    options: DownloadOptions,
+                ) => Promise<{ filePath: string; size: number }>
                 downloadChannel: (
                     options: DownloadChannelOptions,
                 ) => Promise<void>

@@ -65,12 +65,20 @@ contextBridge.exposeInMainWorld('api', {
             qualityItag?: number
             height?: number
             rootDownloadDir?: string
+            downloadThumbnail?: boolean
         }) => ipcRenderer.invoke('youtube:download', options),
+        downloadThumbnail: (options: {
+            url: string
+            savePath: string
+            rootDownloadDir?: string
+        }) => ipcRenderer.invoke('youtube:download-thumbnail', options),
         downloadChannel: (options: {
             channelUrl: string
             saveDir: string
             qualityHeight?: number
             isAudioOnly?: boolean
+            isThumbnail?: boolean
+            downloadThumbnail?: boolean
             rootDownloadDir?: string
         }) => ipcRenderer.invoke('youtube:download-channel', options),
         cancelDownload: () => ipcRenderer.invoke('youtube:cancel-download'),

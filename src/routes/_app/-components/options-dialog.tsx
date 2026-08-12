@@ -1,11 +1,11 @@
 import { ChevronDownIcon, Folder, X } from '#/components/icons'
 import { Button } from '#/components/ui/button'
+import { Checkbox } from '#/components/ui/checkbox'
 import {
     Dialog,
     DialogBody,
     DialogClose,
     DialogContent,
-    DialogDescription,
     DialogFooter,
     DialogHeader,
     DialogIconButton,
@@ -28,6 +28,8 @@ interface DownloadOptionsModalProps {
     onSelectFolder: () => void
     defaultQuality: string
     onDefaultQualityChange: (quality: string) => void
+    downloadThumbnails: boolean
+    onDownloadThumbnailsChange: (enabled: boolean) => void
 }
 
 export function DownloadOptionsModal({
@@ -37,6 +39,8 @@ export function DownloadOptionsModal({
     onSelectFolder,
     defaultQuality,
     onDefaultQualityChange,
+    downloadThumbnails,
+    onDownloadThumbnailsChange,
 }: DownloadOptionsModalProps) {
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -51,11 +55,6 @@ export function DownloadOptionsModal({
                         }
                     />
                 </DialogHeader>
-
-                <DialogDescription>
-                    Configure default download location and video quality
-                    format.
-                </DialogDescription>
 
                 <DialogBody className="flex flex-col gap-4 py-2">
                     {/* Download Folder */}
@@ -109,8 +108,31 @@ export function DownloadOptionsModal({
                                 <SelectItem value="Audio Only">
                                     Audio Only
                                 </SelectItem>
+                                <SelectItem value="Thumbnail">
+                                    Thumbnail
+                                </SelectItem>
                             </SelectContent>
                         </Select>
+                    </div>
+
+                    {/* Companion Thumbnails */}
+                    <div className="flex items-center gap-2.5">
+                        <Checkbox
+                            checked={downloadThumbnails}
+                            onCheckedChange={(c) =>
+                                onDownloadThumbnailsChange(Boolean(c))
+                            }
+                            aria-label="Download thumbnails with videos"
+                        />
+                        <div className="flex flex-col gap-0.5">
+                            <label className="text-foreground/90 text-xs font-medium">
+                                Download thumbnails with videos
+                            </label>
+                            <span className="text-muted-foreground text-[11px]">
+                                Saves the highest-quality thumbnail (jpg)
+                                alongside each video
+                            </span>
+                        </div>
                     </div>
                 </DialogBody>
 

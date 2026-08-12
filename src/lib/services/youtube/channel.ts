@@ -370,8 +370,15 @@ export async function downloadYoutubeChannel(
     startPower: () => void,
     stopPower: () => void,
 ): Promise<void> {
-    const { channelUrl, saveDir, qualityHeight, isAudioOnly, rootDownloadDir } =
-        options
+    const {
+        channelUrl,
+        saveDir,
+        qualityHeight,
+        isAudioOnly,
+        isThumbnail,
+        downloadThumbnail,
+        rootDownloadDir,
+    } = options
     const logDir = rootDownloadDir || path.dirname(saveDir)
     const logger = getSessionLogger()
     logger.setDownloadRoot(logDir)
@@ -382,6 +389,8 @@ export async function downloadYoutubeChannel(
         saveDir,
         qualityHeight,
         isAudioOnly,
+        isThumbnail,
+        downloadThumbnail,
     })
 
     const cleanUrl = channelUrl.trim()
@@ -415,8 +424,15 @@ export async function downloadYoutubeChannel(
 
     if (resolvedFfmpegPath) {
         baseArgs.push('--ffmpeg-location', resolvedFfmpegPath)
-        // Only meaningful with ffmpeg present; without it yt-dlp cannot mux.
-        baseArgs.push('--merge-output-format', 'mp4')
+        if (isThumbnail || downloadThumbnail) {
+            // yt-dlp downloads YouTube thumbnails as webp; convert to jpg so
+            // the files open anywhere.
+            baseArgs.push('--convert-thumbnails', 'jpg')
+        }
+        if (!isThumbnail) {
+            // Only meaningful with ffmpeg present; without it yt-dlp cannot mux.
+            baseArgs.push('--merge-output-format', 'mp4')
+        }
         logger.info(`ffmpeg binary located at: ${resolvedFfmpegPath}`)
     } else {
         logger.warn(
@@ -424,18 +440,36 @@ export async function downloadYoutubeChannel(
         )
     }
 
-    if (isAudioOnly) {
-        baseArgs.push('-f', 'bestaudio')
-        if (canMerge) {
-            // Transcoding to mp3 is an ffmpeg postprocessor.
-            baseArgs.push('-x', '--audio-format', 'mp3')
-        }
-    } else if (qualityHeight) {
-        baseArgs.push('-f', buildVideoFormatSelector(qualityHeight, canMerge))
+    if (isThumbnail) {
+        // Thumbnails only: no media download, yt-dlp picks the highest
+        // resolution thumbnail available for each video.
+        baseArgs.push('--skip-download', '--write-thumbnail')
     } else {
-        baseArgs.push('-f', buildVideoFormatSelector(undefined, canMerge))
+        if (downloadThumbnail) {
+            // Companion thumbnail per video, written alongside the media by
+            // the same yt-dlp run. yt-dlp picks the highest resolution
+            // thumbnail available for each video.
+            baseArgs.push('--write-thumbnail')
+        }
+        if (isAudioOnly) {
+            baseArgs.push('-f', 'bestaudio')
+            if (canMerge) {
+                // Transcoding to mp3 is an ffmpeg postprocessor.
+                baseArgs.push('-x', '--audio-format', 'mp3')
+            }
+        } else if (qualityHeight) {
+            baseArgs.push(
+                '-f',
+                buildVideoFormatSelector(qualityHeight, canMerge),
+            )
+        } else {
+            baseArgs.push('-f', buildVideoFormatSelector(undefined, canMerge))
+        }
     }
 
+    // %(ext)s makes yt-dlp substitute each thumbnail's real extension (webp),
+    // which the convert-thumbnails postprocessor then replaces with jpg — so
+    // converted files land with a single .jpg extension.
     const outputTemplate = path.join(saveDir, '%(title)s [%(id)s].%(ext)s')
     baseArgs.push('-o', outputTemplate, cleanUrl)
 
