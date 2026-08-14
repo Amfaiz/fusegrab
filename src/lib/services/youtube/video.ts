@@ -23,6 +23,7 @@ import {
     createStartPercentGuard,
     parseStreamCount,
     parseYtDlpPercent,
+    parseYtDlpSpeed,
 } from './progress'
 import {
     buildFailureMessage,
@@ -184,6 +185,7 @@ async function runVideoDownloadAttempt(
     let lastRawPercent = 0
     let maxEmittedPercent = 0
     let streamCountKnown = false
+    let currentSpeed: string | undefined = undefined
     let streamWeights = buildStreamWeights(isAudioOnly ? 1 : 2, isAudioOnly)
     const startPercentGuard = createStartPercentGuard()
 
@@ -195,10 +197,7 @@ async function runVideoDownloadAttempt(
 
                 const streamCount = parseStreamCount(line)
                 if (streamCount !== null) {
-                    streamWeights = buildStreamWeights(
-                        streamCount,
-                        isAudioOnly,
-                    )
+                    streamWeights = buildStreamWeights(streamCount, isAudioOnly)
                     streamCountKnown = true
                 }
 
@@ -218,6 +217,7 @@ async function runVideoDownloadAttempt(
                         currentStream++
                     }
                     lastRawPercent = 0
+                    currentSpeed = undefined
                     startPercentGuard.reset()
                     continue
                 }
@@ -230,16 +230,23 @@ async function runVideoDownloadAttempt(
                     line.includes('Deleting original file')
                 ) {
                     maxEmittedPercent = Math.max(maxEmittedPercent, 99)
+                    currentSpeed = undefined
                     const p = {
                         downloadedBytes: 0,
                         totalBytes: 0,
                         percent: maxEmittedPercent,
+                        speed: undefined,
                     }
                     updateState({ progress: p })
                     if (win && !win.isDestroyed()) {
                         win.webContents.send('youtube:progress', p)
                     }
                     continue
+                }
+
+                const speed = parseYtDlpSpeed(line)
+                if (speed) {
+                    currentSpeed = speed
                 }
 
                 const rawPercent = parseYtDlpPercent(line)
@@ -250,6 +257,7 @@ async function runVideoDownloadAttempt(
                         lastRawPercent > 50
                     ) {
                         currentStream++
+                        currentSpeed = undefined
                         startPercentGuard.reset()
                     }
                     lastRawPercent = rawPercent
@@ -270,6 +278,7 @@ async function runVideoDownloadAttempt(
                         downloadedBytes: 0,
                         totalBytes: 0,
                         percent: Math.round(weightedPercent * 10) / 10,
+                        speed: currentSpeed,
                     }
                     updateState({ progress: p })
                     if (win && !win.isDestroyed()) {

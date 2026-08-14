@@ -18,7 +18,7 @@ import { getSessionLogger } from '../logger/service'
 import { ensureFfmpegBinary, ensureYtDlpBinary, spawnOptions } from './binary'
 import { scrapeChannelWithBrowser } from './channel-scraper'
 import { buildVideoFormatSelector } from './format'
-import { isHlsStartGlitch } from './progress'
+import { isHlsStartGlitch, parseYtDlpSpeed } from './progress'
 import {
     buildFailureMessage,
     buildYtDlpAttempts,
@@ -261,6 +261,7 @@ async function runChannelDownloadAttempt(
     let currentItem = 0
     let totalItems = 0
     let videoTitle = ''
+    let currentSpeed: string | undefined = undefined
     const stderrLines: string[] = []
     const rawStderrLines: string[] = []
 
@@ -276,6 +277,7 @@ async function runChannelDownloadAttempt(
                 if (itemMatch) {
                     currentItem = parseInt(itemMatch[1], 10)
                     totalItems = parseInt(itemMatch[2], 10)
+                    currentSpeed = undefined
                     logger.info(
                         `Downloading item ${currentItem} of ${totalItems}`,
                     )
@@ -286,7 +288,13 @@ async function runChannelDownloadAttempt(
                 )
                 if (destMatch) {
                     videoTitle = path.basename(destMatch[1])
+                    currentSpeed = undefined
                     logger.info(`Target destination: ${videoTitle}`)
+                }
+
+                const speed = parseYtDlpSpeed(line)
+                if (speed) {
+                    currentSpeed = speed
                 }
 
                 const ytDlpPercent = line.match(/\[download\]\s+([\d.]+)%/)
@@ -302,6 +310,7 @@ async function runChannelDownloadAttempt(
                             currentItem,
                             totalItems,
                             percent: Math.min(100, percent),
+                            speed: currentSpeed,
                             videoTitle,
                             status: 'downloading',
                         }

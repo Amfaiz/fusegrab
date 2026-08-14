@@ -1,6 +1,5 @@
 import { ChevronDownIcon, Folder, X } from '#/components/icons'
 import { Button } from '#/components/ui/button'
-import { Checkbox } from '#/components/ui/checkbox'
 import {
     Dialog,
     DialogBody,
@@ -20,6 +19,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '#/components/ui/select'
+import { Switch } from '#/components/ui/switch'
 
 interface DownloadOptionsModalProps {
     open: boolean
@@ -56,7 +56,7 @@ export function DownloadOptionsModal({
                     />
                 </DialogHeader>
 
-                <DialogBody className="flex flex-col gap-4 py-2">
+                <DialogBody className="flex flex-col gap-4">
                     {/* Download Folder */}
                     <div className="flex flex-col gap-1.5">
                         <label className="text-foreground/90 text-xs font-medium">
@@ -115,24 +115,26 @@ export function DownloadOptionsModal({
                         </Select>
                     </div>
 
-                    {/* Companion Thumbnails */}
-                    <div className="flex items-center gap-2.5">
-                        <Checkbox
-                            checked={downloadThumbnails}
-                            onCheckedChange={(c) =>
-                                onDownloadThumbnailsChange(Boolean(c))
-                            }
-                            aria-label="Download thumbnails with videos"
-                        />
-                        <div className="flex flex-col gap-0.5">
-                            <label className="text-foreground/90 text-xs font-medium">
+                    {/* Companion Thumbnails Card */}
+                    <div className="border-border bg-surface hover:border-border-strong flex flex-col rounded-md border p-2.5 shadow-[0_1px_1px_rgb(0_0_0/0.03)] transition-[border-color,box-shadow]">
+                        <div className="flex items-center justify-between gap-2.5">
+                            <label
+                                htmlFor="download-thumbnails-switch"
+                                className="text-foreground/90 cursor-pointer text-xs font-medium"
+                            >
                                 Download thumbnails with videos
                             </label>
-                            <span className="text-muted-foreground text-[11px]">
-                                Saves the highest-quality thumbnail (jpg)
-                                alongside each video
-                            </span>
+                            <Switch
+                                id="download-thumbnails-switch"
+                                checked={downloadThumbnails}
+                                onCheckedChange={onDownloadThumbnailsChange}
+                                aria-label="Download thumbnails with videos"
+                            />
                         </div>
+                        <p className="text-muted-foreground mt-1 text-[11px] leading-normal">
+                            Saves the highest-quality thumbnail (.jpg) alongside
+                            each video.
+                        </p>
                     </div>
                 </DialogBody>
 

@@ -48,7 +48,7 @@ export const DialogHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
     <div
         className={cn(
-            'border-border mb-3 flex items-center justify-between gap-3 border-b py-2 pr-2 pl-4',
+            'border-border mb-4 flex items-center justify-between gap-3 border-b py-2 pr-2 pl-4',
             className,
         )}
         {...props}

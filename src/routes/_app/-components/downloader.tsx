@@ -76,6 +76,7 @@ export function YoutubeDownloader() {
                     isSingleUrl,
                     status: 'Ready' as const,
                     statusStage: undefined,
+                    speed: undefined,
                     retryCount: undefined,
                 }
             }
@@ -249,6 +250,7 @@ export function YoutubeDownloader() {
                             ...item,
                             status: 'Ready' as const,
                             statusStage: undefined,
+                            speed: undefined,
                         }
                     }
                     return item
@@ -278,6 +280,10 @@ export function YoutubeDownloader() {
                             ...item,
                             status: 'Downloading',
                             percent: newPercent,
+                            speed:
+                                newPercent > 0 && newPercent < 99
+                                    ? data.speed
+                                    : undefined,
                             statusStage:
                                 newPercent >= 99
                                     ? 'Finalizing...'
@@ -307,6 +313,7 @@ export function YoutubeDownloader() {
                                 ...item,
                                 status: 'Complete',
                                 percent: 100,
+                                speed: undefined,
                                 statusStage: undefined,
                             }
                         }
@@ -317,6 +324,10 @@ export function YoutubeDownloader() {
                                     ? 'Downloading'
                                     : item.status,
                             percent: normalizeProgressPercent(data.percent),
+                            speed:
+                                data.status === 'downloading'
+                                    ? data.speed
+                                    : undefined,
                             statusStage: data.videoTitle
                                 ? `Downloading: ${data.videoTitle}`
                                 : undefined,
@@ -559,6 +570,7 @@ export function YoutubeDownloader() {
         ...item,
         status: 'Downloading',
         percent: 0,
+        speed: undefined,
         statusStage: 'Preparing...',
     })
 
@@ -720,6 +732,7 @@ export function YoutubeDownloader() {
                                       ...i,
                                       status: 'Complete',
                                       percent: 100,
+                                      speed: undefined,
                                       statusStage: undefined,
                                       retryCount: undefined,
                                       savePath,
@@ -764,6 +777,7 @@ export function YoutubeDownloader() {
                                       ...i,
                                       status: 'Complete',
                                       percent: 100,
+                                      speed: undefined,
                                       statusStage: undefined,
                                       retryCount: undefined,
                                       savePath: saveDir,

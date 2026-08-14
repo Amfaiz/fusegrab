@@ -16,7 +16,12 @@ export async function pauseSelectedItems(
                 targetIds.has(i.id) &&
                 (i.status === 'Downloading' || i.status === 'Queued')
             ) {
-                return { ...i, status: 'Paused', statusStage: undefined }
+                return {
+                    ...i,
+                    status: 'Paused',
+                    statusStage: undefined,
+                    speed: undefined,
+                }
             }
             return i
         }),
@@ -54,6 +59,7 @@ export async function stopItemById(
                       ...i,
                       status: 'Paused',
                       statusStage: undefined,
+                      speed: undefined,
                   }
                 : i,
         ),

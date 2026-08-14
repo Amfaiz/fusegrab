@@ -20,6 +20,7 @@ export interface DownloadItem {
         | 'Failed'
     statusStage?: string
     percent: number
+    speed?: string
     timeLeft: string
     dateModified: string
     savePath?: string

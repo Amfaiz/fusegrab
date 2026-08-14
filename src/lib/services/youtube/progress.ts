@@ -23,6 +23,46 @@ export function parseYtDlpPercent(line: string): number | null {
     return null
 }
 
+/** Convert binary IEC speed units (KiB/MiB/GiB) to decimal SI style (KB/MB/GB). */
+function normalizeSpeedUnit(speed: string): string {
+    return speed
+        .replace(
+            /([kKmMgGtTpP])i([bB])(?=\/s|$)/i,
+            (_, unit, b) => `${unit.toUpperCase()}${b.toUpperCase()}`,
+        )
+        .replace(
+            /([kKmMgGtTpP])([bB])(?=\/s|$)/i,
+            (_, unit, b) => `${unit.toUpperCase()}${b.toUpperCase()}`,
+        )
+}
+
+/** Speed from a `[download] 42.3% of ... at 2.45MiB/s` (yt-dlp) or `[#id ... DL:2.5MiB]` (aria2) progress line. */
+export function parseYtDlpSpeed(line: string): string | null {
+    if (isHlsStartGlitch(line)) return null
+
+    // yt-dlp: "[download]  42.3% of ~  50.00MiB at    2.45MiB/s ETA 00:15"
+    // or "[download] 100% of  350.97MiB in 00:01:38 at 3.55MiB/s"
+    const ytDlpMatch = line.match(
+        /\bat\s+(?:~\s*)?([\d.]+\s*(?:[kKmMgGtTpP]?i?[bB])\/s)\b/i,
+    )
+    if (ytDlpMatch) {
+        return normalizeSpeedUnit(ytDlpMatch[1].trim())
+    }
+
+    // aria2: "[#1a2b3c 4.0MiB/16.0MiB(25%) CN:16 DL:2.5MiB]" or "DL:2.5MiB/s"
+    const aria2Match = line.match(
+        /DL:(?:~\s*)?([\d.]+\s*(?:[kKmMgGtTpP]?i?[bB])(?:\/s)?)/i,
+    )
+    if (aria2Match) {
+        const raw = aria2Match[1].trim()
+        const withUnit =
+            raw.endsWith('/s') || raw.endsWith('/S') ? raw : `${raw}/s`
+        return normalizeSpeedUnit(withUnit)
+    }
+
+    return null
+}
+
 /**
  * yt-dlp's hlsnative downloader prints a placeholder progress line before any
  * fragment is fetched: `100.0% of ~ 1.00KiB at ... (frag 0/190)`. The percent
@@ -76,8 +116,9 @@ export function parseStreamCount(line: string): number | null {
     const match = line.match(/Downloading (\d+) format\(s\)(?::\s*(.*))?/)
     if (!match) return null
     if (match[2]) {
-        const streams = match[2].split(/[+,]/).filter((p) => p.trim() !== '')
-            .length
+        const streams = match[2]
+            .split(/[+,]/)
+            .filter((p) => p.trim() !== '').length
         if (streams > 0) return streams
     }
     const count = parseInt(match[1], 10)

@@ -7,6 +7,7 @@ import {
     isHlsStartGlitch,
     parseStreamCount,
     parseYtDlpPercent,
+    parseYtDlpSpeed,
 } from './progress'
 
 describe('parseYtDlpPercent', () => {
@@ -58,6 +59,70 @@ describe('parseYtDlpPercent', () => {
             ),
         ).toBeNull()
         expect(parseYtDlpPercent('')).toBeNull()
+    })
+})
+
+describe('parseYtDlpSpeed', () => {
+    it('parses yt-dlp [download] speed from at clause and converts to SI units', () => {
+        expect(
+            parseYtDlpSpeed(
+                '[download]  59.8% of ~ 382.23MiB at      0.00B/s ETA Unknown (frag 153/254)',
+            ),
+        ).toBe('0.00B/s')
+        expect(
+            parseYtDlpSpeed(
+                '[download] 100% of  350.97MiB in 00:01:38 at 3.55MiB/s',
+            ),
+        ).toBe('3.55MB/s')
+        expect(
+            parseYtDlpSpeed(
+                '[download]   1.6% of ~ 190.00KiB at    379.76B/s ETA Unknown (frag 0/190)',
+            ),
+        ).toBe('379.76B/s')
+        expect(
+            parseYtDlpSpeed(
+                '[download]  42.3% of ~  50.00MiB at ~ 2.45MiB/s ETA 00:15',
+            ),
+        ).toBe('2.45MB/s')
+    })
+
+    it('parses aria2 [download] speed from DL: indicator and converts to SI units', () => {
+        expect(
+            parseYtDlpSpeed(
+                '[#1a2b3c 4.0MiB/16.0MiB(25%) CN:16 DL:2.5MiB ETA:5s]',
+            ),
+        ).toBe('2.5MB/s')
+        expect(
+            parseYtDlpSpeed(
+                '[#1a2b3c 4.0MiB/16.0MiB(25%) CN:16 DL:2.5MiB/s ETA:5s]',
+            ),
+        ).toBe('2.5MB/s')
+        expect(
+            parseYtDlpSpeed('[#36c1d0 1.2MiB/8.5MiB(14%) CN:16 DL:512KiB]'),
+        ).toBe('512KB/s')
+    })
+
+    it('returns null for hlsnative placeholder glitch lines', () => {
+        expect(
+            parseYtDlpSpeed(
+                '[download] 100.0% of ~   1.00KiB at    379.76B/s ETA Unknown (frag 0/190)',
+            ),
+        ).toBeNull()
+    })
+
+    it('returns null for non-speed lines', () => {
+        expect(
+            parseYtDlpSpeed('[download] Destination: /tmp/video.mp4'),
+        ).toBeNull()
+        expect(
+            parseYtDlpSpeed('[youtube] Extracting URL: https://youtu.be/x'),
+        ).toBeNull()
+        expect(
+            parseYtDlpSpeed(
+                '[download]  10.0% of  100.00MiB at  Unknown B/s ETA Unknown',
+            ),
+        ).toBeNull()
+        expect(parseYtDlpSpeed('')).toBeNull()
     })
 })
 

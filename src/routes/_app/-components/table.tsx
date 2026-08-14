@@ -339,12 +339,23 @@ export function DownloaderTable({
                                     {/* Status & Progress */}
                                     <td className="w-48 min-w-0 px-3 py-3.5">
                                         <div className="flex w-full min-w-0 flex-col gap-1 overflow-hidden">
-                                            <div className="flex items-center justify-between text-[11px]">
+                                            <div className="flex items-center justify-between gap-2 text-[11px]">
                                                 <span
                                                     className={`truncate font-medium ${statusTextClass(item.status)}`}
                                                 >
                                                     {getStatusText(item)}
                                                 </span>
+                                                {item.status ===
+                                                    'Downloading' &&
+                                                    item.speed &&
+                                                    item.percent > 0 &&
+                                                    item.percent < 99 && (
+                                                        <span
+                                                            className={`shrink-0 font-medium ${statusTextClass(item.status)}`}
+                                                        >
+                                                            {item.speed}
+                                                        </span>
+                                                    )}
                                             </div>
 
                                             {item.status !== 'Queued' &&
@@ -428,6 +439,7 @@ export function DownloaderTable({
                                                                               status: 'Paused',
                                                                               statusStage:
                                                                                   undefined,
+                                                                              speed: undefined,
                                                                           }
                                                                         : i,
                                                                 ),

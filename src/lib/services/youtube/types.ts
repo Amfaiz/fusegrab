@@ -59,6 +59,7 @@ export interface ChannelProgressEvent {
     currentItem: number
     totalItems: number
     percent: number
+    speed?: string
     videoTitle?: string
     status: 'downloading' | 'completed' | 'cancelled' | 'error'
 }
@@ -71,6 +72,7 @@ export interface ActiveDownloadState {
         downloadedBytes: number
         totalBytes: number
         percent: number
+        speed?: string
     } | null
     channelProgress: ChannelProgressEvent | null
 }

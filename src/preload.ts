@@ -113,6 +113,7 @@ contextBridge.exposeInMainWorld('api', {
                 downloadedBytes: number
                 totalBytes: number
                 percent: number
+                speed?: string
             }) => void,
         ) => {
             const handler = (_: unknown, progress: any) => cb(progress)
@@ -126,6 +127,7 @@ contextBridge.exposeInMainWorld('api', {
                 currentItem: number
                 totalItems: number
                 percent: number
+                speed?: string
                 videoTitle?: string
                 status: 'downloading' | 'completed' | 'cancelled' | 'error'
             }) => void,

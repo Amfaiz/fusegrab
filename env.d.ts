@@ -65,6 +65,7 @@ declare global {
                         downloadedBytes: number
                         totalBytes: number
                         percent: number
+                        speed?: string
                     }) => void,
                 ) => () => void
                 onChannelProgress: (

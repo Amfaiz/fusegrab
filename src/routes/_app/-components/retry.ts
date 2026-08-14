@@ -53,6 +53,7 @@ export function applyDownloadFailure(
         ...item,
         status: attempts >= MAX_RETRY_ATTEMPTS ? 'Failed' : 'Retry',
         statusStage: message || 'Download failed',
+        speed: undefined,
         retryCount: attempts,
     }
 }

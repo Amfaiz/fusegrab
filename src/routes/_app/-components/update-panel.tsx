@@ -12,19 +12,28 @@ export function UpdatePanel() {
     const isChecking = state.status === 'checking'
     const isAvailable = state.status === 'available'
     const isDownloaded = state.status === 'downloaded'
+    const isInstalling = state.status === 'installing'
 
-    // Idle, checking, available and downloaded share one compact row: a label
-    // on the left, a single action button on the right. Checking swaps in a
-    // disabled spinner; available a primary download button; downloaded a
-    // primary restart button.
-    if (state.status === 'idle' || isChecking || isAvailable || isDownloaded) {
+    // Idle, checking, available, downloaded, and installing share one compact
+    // row: a label on the left, a single action button on the right. Checking
+    // and installing swap in a disabled spinner; available a primary download
+    // button; downloaded a primary restart button.
+    if (
+        state.status === 'idle' ||
+        isChecking ||
+        isAvailable ||
+        isDownloaded ||
+        isInstalling
+    ) {
         const label = isAvailable
             ? `Available: ${state.version}`
             : isDownloaded
               ? 'Restart to update'
-              : currentVersion
-                ? `v${currentVersion}`
-                : ''
+              : isInstalling
+                ? 'Installing update…'
+                : currentVersion
+                  ? `v${currentVersion}`
+                  : ''
         return (
             <div className="border-border flex h-12 items-center justify-between border-t p-2.5">
                 <span className="text-muted-foreground text-[11px]">
@@ -57,20 +66,24 @@ export function UpdatePanel() {
                         variant="ghost"
                         size="sm"
                         onClick={() => void check()}
-                        disabled={isChecking}
+                        disabled={isChecking || isInstalling}
                         title={
-                            isChecking
-                                ? 'Checking for updates…'
-                                : 'Check for updates'
+                            isInstalling
+                                ? 'Installing update…'
+                                : isChecking
+                                  ? 'Checking for updates…'
+                                  : 'Check for updates'
                         }
                         aria-label={
-                            isChecking
-                                ? 'Checking for updates'
-                                : 'Check for updates'
+                            isInstalling
+                                ? 'Installing update'
+                                : isChecking
+                                  ? 'Checking for updates'
+                                  : 'Check for updates'
                         }
                         className="px-1.5"
                     >
-                        {isChecking ? (
+                        {isChecking || isInstalling ? (
                             <Loader2 className="animate-spin" />
                         ) : (
                             <RefreshCw />
@@ -81,7 +94,7 @@ export function UpdatePanel() {
         )
     }
 
-    // Fixed-height section: every state renders inside the same h-44 box so the
+    // Fixed-height section: every state renders inside the same box so the
     // sidebar never jumps when the status changes.
     let content: ReactNode = null
     switch (state.status) {
@@ -95,15 +108,6 @@ export function UpdatePanel() {
                         </span>
                     </div>
                     <ProgressBar value={state.percent / 100} />
-                </div>
-            )
-            break
-
-        case 'installing':
-            content = (
-                <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
-                    <Loader2 className="size-3.5 animate-spin" />
-                    Installing update…
                 </div>
             )
             break

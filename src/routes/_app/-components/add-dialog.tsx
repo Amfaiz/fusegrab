@@ -1,11 +1,10 @@
-import { Youtube, Loader2, Search, X } from '#/components/icons'
+import { Loader2, Search, X, Youtube } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import {
     Dialog,
     DialogBody,
     DialogClose,
     DialogContent,
-    DialogDescription,
     DialogFooter,
     DialogHeader,
     DialogIconButton,
@@ -70,11 +69,6 @@ export function AddUrlModal({
                             }
                         />
                     </DialogHeader>
-
-                    <DialogDescription>
-                        Enter a YouTube video, playlist, or channel URL to
-                        download.
-                    </DialogDescription>
 
                     <DialogBody>
                         <InputRoot>
