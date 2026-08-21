@@ -97,7 +97,6 @@ export function YoutubeDownloader() {
         avatarUrl: string | null
         email: string | null
     } | null>(null)
-    const [signInDismissed, setSignInDismissed] = useState(false)
     const [signInStatus, setSignInStatus] = useState<
         'idle' | 'opened' | 'signed-in' | 'closed' | 'signed-out'
     >('idle')
@@ -373,11 +372,6 @@ export function YoutubeDownloader() {
         const off = window.api.youtube.onSignInState((state) => {
             setSignInStatus(state?.status || 'idle')
             if (state?.status === 'opened') {
-                // Re-show the gate even if the user previously skipped it —
-                // the embedded sign-in webview only renders inside it, so
-                // dismissing it once would otherwise make the sidebar's
-                // "Sign in" button a no-op forever.
-                setSignInDismissed(false)
                 setSignInUrl(state.url ?? null)
             } else if (state?.status === 'signed-in') {
                 setSignedIn(true)
@@ -399,7 +393,6 @@ export function YoutubeDownloader() {
             } else if (state?.status === 'signed-out') {
                 // Explicit sign-out — re-read so the gate reappears.
                 setSignInUrl(null)
-                setSignInDismissed(false)
                 void refresh()
             } else if (state?.status === 'closed') {
                 // Poll timed out without a session — drop the webview and
@@ -1004,7 +997,8 @@ export function YoutubeDownloader() {
         return <SplashScreen />
     }
 
-    if (signedIn !== true && !signInDismissed) {
+    if (signedIn !== true) {
+        // No YouTube session — the app stays gated until one exists.
         return (
             <SignInScreen
                 checking={false}
@@ -1012,7 +1006,6 @@ export function YoutubeDownloader() {
                 url={signInUrl}
                 onSignIn={handleOpenSignIn}
                 onCancel={handleCancelSignIn}
-                onSkip={() => setSignInDismissed(true)}
             />
         )
     }

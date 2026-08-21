@@ -28,6 +28,7 @@ import {
 import {
     buildFailureMessage,
     buildYtDlpAttempts,
+    humanizeSessionError,
     runJsonAttempts,
     shouldContinueToNextAttempt,
     shouldRetryWithAlternative,
@@ -43,7 +44,7 @@ export async function getYoutubeVideoInfo(
         throw new Error('Invalid YouTube video URL')
     }
 
-    // yt-dlp and the strategy ladder (aria2, deno, cookie jar) are independent
+    // yt-dlp and the strategy ladder (deno, cookie jar) are independent
     // — fetch them in parallel so the first run stalls on the slowest, not the
     // sum. The shared download promise in ensureYtDlpBinary dedupes against
     // the startup pre-warm.
@@ -439,6 +440,7 @@ export async function downloadYoutubeVideo(
     baseArgs.push('-o', savePath, cleanUrl)
 
     let lastError: Error | null = null
+    let firstOtherError: Error | null = null
     let botCheckError: Error | null = null
 
     for (let i = 0; i < attempts.length; i++) {
@@ -467,16 +469,21 @@ export async function downloadYoutubeVideo(
             const error = err instanceof Error ? err : new Error(String(err))
             lastError = error
             logger.warn(`Attempt "${attempt.label}" failed: ${error.message}`)
-            if (!botCheckError && shouldRetryWithAlternative(error.message)) {
-                botCheckError = error
+            if (shouldRetryWithAlternative(error.message)) {
+                botCheckError ??= error
+            } else {
+                firstOtherError ??= error
             }
             if (!shouldContinueToNextAttempt(error.message)) {
                 logger.endDownload(downloadLabel, false)
-                throw botCheckError ?? error
+                throw botCheckError ?? firstOtherError ?? error
             }
         }
     }
 
     logger.endDownload(downloadLabel, false)
-    throw botCheckError ?? lastError ?? new Error('Video download failed')
+    const failure =
+        botCheckError ?? firstOtherError ?? lastError ?? null
+    if (!failure) throw new Error('Video download failed')
+    throw new Error(humanizeSessionError(failure.message) ?? failure.message)
 }

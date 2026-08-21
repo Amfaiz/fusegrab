@@ -277,6 +277,88 @@ async function findInstallerInDirectory(
     }
 }
 
+async function launchWindowsInstaller(
+    installerPath: string,
+    args: string[] = ['/AUTOUPDATE'],
+): Promise<void> {
+    // NSIS setup executables built with RequestExecutionLevel admin require
+    // UAC elevation. Direct child_process.spawn() uses CreateProcessW, which
+    // fails with ERROR_ELEVATION_REQUIRED (EACCES) when invoked from a standard
+    // non-elevated user token.
+    //
+    // Invoking via PowerShell Start-Process or cmd `start` routes through
+    // ShellExecuteEx, which correctly prompts for UAC elevation and launches
+    // the elevated installer.
+    try {
+        await new Promise<void>((resolve, reject) => {
+            const escapedPath = installerPath.replace(/'/g, "''")
+            const argList = args
+                .map((a) => `'${a.replace(/'/g, "''")}'`)
+                .join(', ')
+            const psCommand = `Start-Process -FilePath '${escapedPath}'${argList ? ` -ArgumentList ${argList}` : ''}`
+
+            const child = spawn(
+                'powershell.exe',
+                [
+                    '-NoProfile',
+                    '-NonInteractive',
+                    '-WindowStyle',
+                    'Hidden',
+                    '-Command',
+                    psCommand,
+                ],
+                {
+                    detached: true,
+                    stdio: 'ignore',
+                    windowsHide: true,
+                },
+            )
+
+            let settled = false
+            child.once('error', (err) => {
+                if (!settled) {
+                    settled = true
+                    reject(err)
+                }
+            })
+            child.once('spawn', () => {
+                child.unref()
+                if (!settled) {
+                    settled = true
+                    resolve()
+                }
+            })
+        })
+    } catch {
+        // Fallback: cmd.exe start uses ShellExecuteEx as well
+        await new Promise<void>((resolve, reject) => {
+            const child = spawn(
+                process.env.ComSpec || 'cmd.exe',
+                ['/c', 'start', '""', installerPath, ...args],
+                {
+                    detached: true,
+                    stdio: 'ignore',
+                    windowsHide: true,
+                },
+            )
+            let settled = false
+            child.once('error', (err) => {
+                if (!settled) {
+                    settled = true
+                    reject(err)
+                }
+            })
+            child.once('spawn', () => {
+                child.unref()
+                if (!settled) {
+                    settled = true
+                    resolve()
+                }
+            })
+        })
+    }
+}
+
 export async function installUpdate(): Promise<boolean> {
     if (installing) return false
     installing = true
@@ -303,11 +385,7 @@ export async function installUpdate(): Promise<boolean> {
             // /AUTOUPDATE matches the convention in build/installer.nsi: the
             // installer shows its progress window but skips every choice page
             // and relaunches the app itself when done.
-            const child = spawn(downloadedInstaller, ['/AUTOUPDATE'], {
-                detached: true,
-                stdio: 'ignore',
-            })
-            child.unref()
+            await launchWindowsInstaller(downloadedInstaller, ['/AUTOUPDATE'])
             app.quit()
             return true
         }

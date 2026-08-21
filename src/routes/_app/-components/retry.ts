@@ -4,10 +4,16 @@ import { MAX_RETRY_ATTEMPTS } from './types'
 
 /**
  * True when the failure is YouTube's bot wall rather than a dead URL. Used to
- * offer the in-app sign-in action where the error is surfaced.
+ * offer the in-app sign-in action where the error is surfaced. Matches both
+ * the raw yt-dlp wording and the humanized wording the main process now sends.
  */
 export function isBotCheckError(message: string): boolean {
-    return /Sign in to confirm you're not a bot/i.test(message)
+    return (
+        /Sign in to confirm you'?re not a bot/i.test(message) ||
+        /rejecting this request as automated|session may have expired|session was rejected/i.test(
+            message,
+        )
+    )
 }
 
 /**

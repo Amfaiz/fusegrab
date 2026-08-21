@@ -11,7 +11,6 @@ interface SignInScreenProps {
     url?: string | null
     onSignIn: () => void
     onCancel: () => void
-    onSkip: () => void
 }
 
 /**
@@ -20,8 +19,8 @@ interface SignInScreenProps {
  * tampering) — the same approach the recreate app's browser panel uses, which
  * Google does not block. The main process polls that partition's cookies and
  * reports 'signed-in' the moment a session appears. The downloader UI is not
- * rendered behind the gate, but signing in can be skipped (anonymous
- * downloads + the retry ladder still work when Google allows them).
+ * rendered behind the gate, and there is no way past it without signing in:
+ * downloads require a session, so anonymous mode no longer exists.
  */
 export function SignInScreen({
     checking,
@@ -29,7 +28,6 @@ export function SignInScreen({
     url,
     onSignIn,
     onCancel,
-    onSkip,
 }: SignInScreenProps) {
     if (url) {
         return (
@@ -87,8 +85,8 @@ export function SignInScreen({
                             Sign in to YouTube
                         </h1>
                         <p className="text-muted-foreground max-w-72 text-sm">
-                            Sign in inside FuseGrab to avoid YouTube's bot
-                            checks — your session is picked up automatically.
+                            FuseGrab requires a YouTube sign-in to download —
+                            your session is picked up automatically.
                         </p>
                     </div>
                 </div>
@@ -111,14 +109,6 @@ export function SignInScreen({
                               ? 'Opening sign-in…'
                               : 'Sign in to YouTube'}
                     </Button>
-
-                    <button
-                        type="button"
-                        onClick={onSkip}
-                        className="text-muted-foreground hover:text-foreground cursor-pointer py-1 text-xs underline-offset-4 hover:underline"
-                    >
-                        Continue without signing in
-                    </button>
                 </div>
             </div>
         </div>

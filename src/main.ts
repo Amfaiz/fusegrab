@@ -246,7 +246,7 @@ app.on('ready', async () => {
         })
     }, 4000)
 
-    // Pre-warm yt-dlp/aria2/deno in the background so the first paste or
+    // Pre-warm yt-dlp/deno in the background so the first paste or
     // download never blocks on a binary fetch. yt-dlp is version-checked here
     // on every startup — not just the 24h window — so YouTube-side breakage
     // heals the moment the app launches. Deno is bundled in the installer, so

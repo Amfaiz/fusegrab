@@ -2,7 +2,7 @@ import type { SessionLogger } from '../logger/service'
 import type { BrowserWindow } from 'electron'
 
 import { app } from 'electron'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import {
     createWriteStream,
     existsSync,
@@ -13,7 +13,6 @@ import {
     writeFileSync,
 } from 'node:fs'
 import { chmod, rename, rm } from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { gunzipSync } from 'node:zlib'
 
@@ -575,157 +574,7 @@ async function resolveFfmpegBinary(
     return null
 }
 
-function getAria2BinaryName(): string {
-    if (process.platform === 'win32') return 'aria2c.exe'
-    return 'aria2c'
-}
 
-export async function ensureAria2Binary(
-    logger?: SessionLogger,
-): Promise<string | null> {
-    const binDir = path.join(app.getPath('userData'), 'bin')
-    const binName = getAria2BinaryName()
-    const binPath = path.join(binDir, binName)
-
-    if (existsSync(binPath)) {
-        try {
-            const stat = statSync(binPath)
-            if (stat.size > 1000) {
-                logger?.info(`Found cached aria2c binary at: ${binPath}`)
-                return binPath
-            }
-        } catch {}
-    }
-
-    try {
-        const checkCmd = process.platform === 'win32' ? 'where' : 'which'
-        const sysPath = await new Promise<string>((resolve, reject) => {
-            execFile(checkCmd, [binName], NO_WINDOW, (err, stdout) => {
-                if (err || !stdout.trim()) return reject(err)
-                resolve(stdout.trim().split('\n')[0].trim())
-            })
-        })
-        if (sysPath && existsSync(sysPath)) {
-            logger?.info(`Found system aria2c binary at: ${sysPath}`)
-            return sysPath
-        }
-    } catch {}
-
-    logger?.info(
-        'aria2c binary not found locally or in PATH. Attempting automatic download...',
-    )
-    try {
-        mkdirSync(binDir, { recursive: true })
-        let downloadUrl = ''
-        if (process.platform === 'win32') {
-            downloadUrl =
-                'https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip'
-        } else if (process.platform === 'darwin') {
-            const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64'
-            downloadUrl = `https://github.com/q741451/aria2c-macos-standalone-binary/releases/download/v1.0.0/aria2c-macos-${arch}.tar.gz`
-        } else {
-            logger?.warn(
-                'Automatic aria2 download is not supported on this platform.',
-            )
-            return null
-        }
-
-        logger?.info(`Downloading aria2 release archive from ${downloadUrl}...`)
-        const res = await fetch(downloadUrl)
-        if (!res.ok || !res.body) {
-            const warnMsg = `Failed to fetch aria2 archive from ${downloadUrl}: HTTP ${res.status} ${res.statusText}`
-            logger?.warn(warnMsg)
-            return null
-        }
-
-        const ext = process.platform === 'win32' ? 'zip' : 'tar.gz'
-        const tmpArchive = path.join(binDir, `aria2_archive.${ext}`)
-        const buffer = Buffer.from(await res.arrayBuffer())
-
-        await new Promise<void>((resolve, reject) => {
-            const ws = createWriteStream(tmpArchive)
-            ws.write(buffer, (writeErr) => {
-                if (writeErr) {
-                    ws.destroy()
-                    return reject(writeErr)
-                }
-                ws.end(() => resolve())
-            })
-            ws.on('error', reject)
-        })
-
-        if (process.platform === 'win32') {
-            logger?.info(
-                'Extracting Windows aria2 zip archive via PowerShell...',
-            )
-            await new Promise((resolve, reject) => {
-                execFile(
-                    'powershell',
-                    [
-                        '-NoProfile',
-                        '-NonInteractive',
-                        '-Command',
-                        `Expand-Archive -LiteralPath "${tmpArchive}" -DestinationPath "${binDir}" -Force`,
-                    ],
-                    NO_WINDOW,
-                    (err) => (err ? reject(err) : resolve(true)),
-                )
-            })
-        } else {
-            logger?.info('Extracting macOS aria2 tar archive...')
-            await new Promise((resolve, reject) => {
-                execFile(
-                    'tar',
-                    ['-xzf', tmpArchive, '-C', binDir],
-                    NO_WINDOW,
-                    (err) => (err ? reject(err) : resolve(true)),
-                )
-            })
-        }
-
-        const findBinary = (dir: string): string | null => {
-            const entries = readdirSync(dir)
-            for (const entry of entries) {
-                const full = path.join(dir, entry)
-                if (entry.toLowerCase() === binName.toLowerCase()) return full
-                if (statSync(full).isDirectory()) {
-                    const found = findBinary(full)
-                    if (found) return found
-                }
-            }
-            return null
-        }
-
-        const foundBin = findBinary(binDir)
-        if (foundBin && foundBin !== binPath) {
-            await rename(foundBin, binPath).catch(() => undefined)
-        }
-
-        if (process.platform !== 'win32' && existsSync(binPath)) {
-            await chmod(binPath, 0o755).catch(() => undefined)
-        }
-
-        await rm(tmpArchive, { force: true }).catch(() => undefined)
-
-        if (existsSync(binPath)) {
-            logger?.info(
-                `aria2 binary successfully downloaded and installed at ${binPath}`,
-            )
-            return binPath
-        } else {
-            logger?.warn(
-                'Extracted aria2 binary was not found at expected destination.',
-            )
-        }
-    } catch (err: any) {
-        logger?.warn(
-            `Failed to download/load aria2 binary: ${err?.message || String(err)}. Falling back to standard downloader.`,
-            err,
-        )
-    }
-
-    return null
-}
 
 /**
  * A Chrome UA that matches the machine the app actually runs on — and the
@@ -937,7 +786,7 @@ function getDenoBinaryName(): string {
  * The app cannot rely on the user having deno or node installed: a packaged
  * app launched from Finder/Dock or Explorer inherits a minimal PATH, and most
  * Windows users simply don't have node. So deno is downloaded next to yt-dlp,
- * exactly like the app already does for yt-dlp/ffmpeg/aria2.
+ * exactly like the app already does for yt-dlp/ffmpeg.
  */
 function getDenoDownloadAsset(): string | null {
     const { platform, arch } = process
@@ -1125,9 +974,7 @@ export async function ensureDenoBinary(
 export async function getAntiRateLimitArgs(
     win?: BrowserWindow | null,
     logger?: SessionLogger,
-    options?: { includeCookieJar?: boolean },
 ): Promise<string[]> {
-    const includeCookieJar = options?.includeCookieJar ?? true
     const userAgent =
         (win && !win.isDestroyed() && win.webContents.getUserAgent()) ||
         getPlatformUserAgent()
@@ -1147,27 +994,15 @@ export async function getAntiRateLimitArgs(
         '5',
         '--file-access-retries',
         '3',
+        '--concurrent-fragments',
+        '5',
     ]
 
-    const aria2Path = await ensureAria2Binary(logger)
-    if (aria2Path) {
-        logger?.info(`Using aria2 accelerator binary at: ${aria2Path}`)
-        args.push(
-            '--external-downloader',
-            `http,https:${aria2Path}`,
-            '--external-downloader-args',
-            'aria2c:-j 16 -x 16 -s 16 -k 1M --connect-timeout=5 --timeout=5 --max-tries=3 --summary-interval=1',
-        )
-    } else {
-        logger?.info(
-            'aria2 accelerator is unavailable. Using standard concurrent fragment downloader.',
-        )
-    }
-    args.push('--concurrent-fragments', '5')
+    logger?.info(
+        'Using yt-dlp built-in concurrent fragment downloader (5 fragments)',
+    )
 
-    if (includeCookieJar) {
-        args.push(...(await getCookieJarArgs(logger)))
-    }
+    args.push(...(await getCookieJarArgs(logger)))
 
     return args
 }
@@ -1211,151 +1046,6 @@ export function getYtCookieJarPath(): string {
 }
 
 /**
- * Browsers yt-dlp knows how to read cookies from (`--cookies-from-browser`),
- * in preference order. Detection is path-based so a failing attempt isn't
- * wasted on a browser that isn't installed. Safari is deliberately excluded on
- * macOS: reading its cookies needs Full Disk Access, which a packaged app does
- * not have by default.
- */
-/** macOS app names for `open -Ra` / `open -a` lookups. */
-export const MAC_BROWSER_APP_NAMES: Record<string, string> = {
-    chrome: 'Google Chrome',
-    edge: 'Microsoft Edge',
-    brave: 'Brave Browser',
-    firefox: 'Firefox',
-}
-
-let cachedDetectedBrowsers: string[] | null = null
-
-/**
- * Browsers yt-dlp knows how to read cookies from (`--cookies-from-browser`),
- * in preference order. Path-based detection covers both /Applications and the
- * user's ~/Applications (many macOS installs are user-level); as a final,
- * authoritative check on macOS, `open -Ra` resolves the app regardless of
- * where it lives. Safari is deliberately last: reading its cookies needs Full
- * Disk Access, which the app cannot request automatically.
- *
- * Result is cached for the process lifetime (re-detect on next launch).
- */
-export function detectInstalledBrowsers(): string[] {
-    if (cachedDetectedBrowsers !== null) return cachedDetectedBrowsers
-
-    const home = os.homedir()
-    const candidates: Array<[string, string[]]> =
-        process.platform === 'win32'
-            ? [
-                  [
-                      'edge',
-                      [
-                          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-                          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-                      ],
-                  ],
-                  [
-                      'chrome',
-                      [
-                          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-                      ],
-                  ],
-                  [
-                      'brave',
-                      [
-                          'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
-                      ],
-                  ],
-                  [
-                      'firefox',
-                      [
-                          'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
-                          'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe',
-                      ],
-                  ],
-              ]
-            : process.platform === 'darwin'
-              ? [
-                    [
-                        'chrome',
-                        [
-                            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-                            path.join(
-                                home,
-                                'Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-                            ),
-                        ],
-                    ],
-                    [
-                        'edge',
-                        [
-                            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-                            path.join(
-                                home,
-                                'Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-                            ),
-                        ],
-                    ],
-                    [
-                        'brave',
-                        [
-                            '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
-                            path.join(
-                                home,
-                                'Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
-                            ),
-                        ],
-                    ],
-                    [
-                        'firefox',
-                        [
-                            '/Applications/Firefox.app/Contents/MacOS/firefox',
-                            path.join(
-                                home,
-                                'Applications/Firefox.app/Contents/MacOS/firefox',
-                            ),
-                        ],
-                    ],
-                    [
-                        // Always present on macOS; reading its cookies needs
-                        // Full Disk Access, so it is tried last and fails with
-                        // a tailored message.
-                        'safari',
-                        ['/Applications/Safari.app/Contents/MacOS/Safari'],
-                    ],
-                ]
-              : [
-                    [
-                        'chromium',
-                        ['/usr/bin/chromium', '/usr/bin/chromium-browser'],
-                    ],
-                    ['firefox', ['/usr/bin/firefox']],
-                ]
-
-    const found = candidates
-        .filter(([, paths]) => paths.some((p) => p && existsSync(p)))
-        .map(([name]) => name)
-
-    // Authoritative fallback: `open -Ra` resolves an app anywhere on the
-    // system, so a browser in an unusual location is still detected.
-    if (process.platform === 'darwin') {
-        for (const [name, appName] of Object.entries(MAC_BROWSER_APP_NAMES)) {
-            if (found.includes(name)) continue
-            try {
-                execFileSync('open', ['-Ra', appName], {
-                    stdio: 'ignore',
-                    windowsHide: true,
-                })
-                found.push(name)
-            } catch {
-                // Not installed.
-            }
-        }
-    }
-
-    cachedDetectedBrowsers = found
-    return found
-}
-
-/**
  * Background warm-up for the runtime binaries so the first paste or download
  * never blocks on a fetch. yt-dlp is version-checked on every startup
  * (forceUpdate) so YouTube-side breakage heals without waiting for the 24h
@@ -1368,7 +1058,6 @@ export function prewarmYoutubeBinaries(
 ): Promise<PromiseSettledResult<string | null>[]> {
     return Promise.allSettled([
         ensureYtDlpBinary(true, logger),
-        ensureAria2Binary(logger),
         ensureDenoBinary(logger),
     ])
 }

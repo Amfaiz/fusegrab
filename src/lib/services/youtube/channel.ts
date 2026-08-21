@@ -22,6 +22,7 @@ import { isHlsStartGlitch, parseYtDlpSpeed } from './progress'
 import {
     buildFailureMessage,
     buildYtDlpAttempts,
+    humanizeSessionError,
     runJsonAttempts,
     shouldContinueToNextAttempt,
     shouldRetryWithAlternative,
@@ -485,6 +486,7 @@ export async function downloadYoutubeChannel(
     logger.info(`Output template: ${outputTemplate}`)
 
     let lastError: Error | null = null
+    let firstOtherError: Error | null = null
     let botCheckError: Error | null = null
 
     for (let i = 0; i < attempts.length; i++) {
@@ -511,16 +513,20 @@ export async function downloadYoutubeChannel(
             const error = err instanceof Error ? err : new Error(String(err))
             lastError = error
             logger.warn(`Attempt "${attempt.label}" failed: ${error.message}`)
-            if (!botCheckError && shouldRetryWithAlternative(error.message)) {
-                botCheckError = error
+            if (shouldRetryWithAlternative(error.message)) {
+                botCheckError ??= error
+            } else {
+                firstOtherError ??= error
             }
             if (!shouldContinueToNextAttempt(error.message)) {
                 logger.endDownload(downloadLabel, false)
-                throw botCheckError ?? error
+                throw botCheckError ?? firstOtherError ?? error
             }
         }
     }
 
     logger.endDownload(downloadLabel, false)
-    throw botCheckError ?? lastError ?? new Error('Channel download failed')
+    const failure = botCheckError ?? firstOtherError ?? lastError
+    if (!failure) throw new Error('Channel download failed')
+    throw new Error(humanizeSessionError(failure.message) ?? failure.message)
 }

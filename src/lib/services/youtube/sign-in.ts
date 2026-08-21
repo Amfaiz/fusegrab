@@ -62,6 +62,7 @@ function readJarCookies(): Array<{
     const jarPath = getYtCookieJarPath()
     if (!existsSync(jarPath)) return []
     const cookies: Array<{ name: string; value: string; domain: string }> = []
+    const nowSeconds = Date.now() / 1000
     for (const line of readFileSync(jarPath, 'utf-8').split('\n')) {
         const trimmed = line.trim()
         if (!trimmed) continue
@@ -71,6 +72,15 @@ function readJarCookies(): Array<{
         }
         const fields = trimmed.split('\t')
         if (fields.length < 7) continue
+        // Expiration 0 means a session cookie, which never goes stale on disk.
+        const expiresAt = Number(fields[4])
+        if (
+            Number.isFinite(expiresAt) &&
+            expiresAt > 0 &&
+            expiresAt < nowSeconds
+        ) {
+            continue
+        }
         const domain = fields[0].startsWith('#HttpOnly_')
             ? fields[0].slice('#HttpOnly_'.length)
             : fields[0]
@@ -89,6 +99,18 @@ function getYoutubeCookies() {
 
 export function isYoutubeSignedIn(): boolean {
     return getYoutubeCookies().some((c) => LOGGED_IN_COOKIES.has(c.name))
+}
+
+/**
+ * Called when YouTube rejects a request (bot check / 403 / 429). If the jar no
+ * longer holds a live session — cookies expired or were cleared — tell every
+ * window so the mandatory sign-in gate reappears instead of letting downloads
+ * fail repeatedly with session errors.
+ */
+export function notifyIfSessionExpired(): void {
+    if (!isYoutubeSignedIn()) {
+        emitState('signed-out')
+    }
 }
 
 function emitState(status: 'opened' | 'signed-in' | 'closed' | 'signed-out') {
