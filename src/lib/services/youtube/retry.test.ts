@@ -16,9 +16,12 @@ vi.mock('./sign-in', () => ({
 
 vi.mock('./binary', () => ({
     detectInstalledBrowsers: vi.fn(() => []),
-    getAntiRateLimitArgs: vi.fn(
-        async () => ['--user-agent', 'test-ua', '--cookies', '/x/yt_cookies.txt'],
-    ),
+    getAntiRateLimitArgs: vi.fn(async () => [
+        '--user-agent',
+        'test-ua',
+        '--cookies',
+        '/x/yt_cookies.txt',
+    ]),
     getJsRuntimeArgs: vi.fn(async () => ['--js-runtimes', 'deno:/x/deno']),
 }))
 
@@ -46,6 +49,24 @@ describe('shouldRetryWithAlternative', () => {
         )
     })
 
+    it('matches JS runtime panics and n-challenge failures', () => {
+        expect(
+            shouldRetryWithAlternative(
+                'WARNING: [youtube] [jsc] Error solving n challenge request using "deno" provider: Error running deno process',
+            ),
+        ).toBe(true)
+        expect(
+            shouldRetryWithAlternative(
+                'Fatal error in :0: Check failed: 12 == (*__error()).',
+            ),
+        ).toBe(true)
+        expect(
+            shouldRetryWithAlternative(
+                'ERROR: [youtube] xyz: The page needs to be reloaded.',
+            ),
+        ).toBe(true)
+    })
+
     it('does not match unrelated failures', () => {
         expect(
             shouldRetryWithAlternative(
@@ -57,37 +78,45 @@ describe('shouldRetryWithAlternative', () => {
 })
 
 describe('shouldContinueToNextAttempt', () => {
-    it('continues past a YouTube-side block', () => {
+    it('continues past a YouTube-side block or runtime failure', () => {
         expect(
-            shouldContinueToNextAttempt(
-                "Sign in to confirm you're not a bot",
-            ),
+            shouldContinueToNextAttempt("Sign in to confirm you're not a bot"),
         ).toBe(true)
         expect(shouldContinueToNextAttempt('HTTP Error 429')).toBe(true)
+        expect(
+            shouldContinueToNextAttempt(
+                'Deno has panicked. This is a bug in Deno.',
+            ),
+        ).toBe(true)
     })
 
     it('stops on ordinary failures', () => {
-        expect(
-            shouldContinueToNextAttempt('Video unavailable'),
-        ).toBe(false)
+        expect(shouldContinueToNextAttempt('Video unavailable')).toBe(false)
     })
 })
 
 describe('humanizeSessionError', () => {
     it('translates the bot check into an actionable instruction', () => {
-        const msg = humanizeSessionError(
-            "Sign in to confirm you're not a bot.",
-        )
+        const msg = humanizeSessionError("Sign in to confirm you're not a bot.")
         expect(msg).toContain('session may have expired')
         expect(msg).not.toContain('--cookies')
     })
 
     it('translates 403 and 429', () => {
-        expect(humanizeSessionError('HTTP Error 429: Too Many Requests'))
-            .toContain('rate-limiting')
+        expect(
+            humanizeSessionError('HTTP Error 429: Too Many Requests'),
+        ).toContain('rate-limiting')
         expect(humanizeSessionError('HTTP Error 403: Forbidden')).toContain(
             '403',
         )
+    })
+
+    it('translates JS runtime and challenge errors', () => {
+        expect(
+            humanizeSessionError(
+                'Deno has panicked: Check failed: 12 == (*__error())',
+            ),
+        ).toContain('JavaScript runtime')
     })
 
     it('leaves unrelated errors alone', () => {

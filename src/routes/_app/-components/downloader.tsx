@@ -1,3 +1,4 @@
+import type { YoutubeVideoInfo } from '#/lib/services/youtube/types'
 import type { DownloadItem } from './types'
 
 import { useEffect, useRef, useState } from 'react'
@@ -27,7 +28,7 @@ import { SignInScreen } from './sign-in-screen'
 import { SplashScreen } from './splash-screen'
 import { DownloaderTable } from './table'
 import { DownloaderToolbar } from './toolbar'
-import { formatDate, sanitizeFilename } from './types'
+import { formatDate, formatTimeCode, sanitizeFilename } from './types'
 
 const isMac =
     typeof window !== 'undefined' &&
@@ -87,6 +88,11 @@ export function YoutubeDownloader() {
     const [activeFilter, setActiveFilter] = useState('all')
     const [searchQuery, setSearchQuery] = useState('')
     const [showAddUrlModal, setShowAddUrlModal] = useState(false)
+    const [clipTargetUrl, setClipTargetUrl] = useState<string | null>(null)
+    const [clipTargetSection, setClipTargetSection] = useState<{
+        startSeconds: number
+        endSeconds: number
+    } | null>(null)
     const [showOptionsModal, setShowOptionsModal] = useState(false)
     const [inputUrl, setInputUrl] = useState('')
     const [loadingInfo, setLoadingInfo] = useState(false)
@@ -112,6 +118,7 @@ export function YoutubeDownloader() {
     const [downloadDir, setDownloadDir] = useState<string>('')
     const downloadDirRef = useRef('')
     const [isDownloading, setIsDownloading] = useState(false)
+    const [activeItemId, setActiveItemId] = useState<string | null>(null)
     const [activeItemUrl, setActiveItemUrl] = useState<string | null>(null)
     const [missingFileItem, setMissingFileItem] = useState<DownloadItem | null>(
         null,
@@ -205,6 +212,11 @@ export function YoutubeDownloader() {
         })
     }, [])
 
+    const activeItemIdRef = useRef<string | null>(null)
+    useEffect(() => {
+        activeItemIdRef.current = activeItemId
+    }, [activeItemId])
+
     const activeItemUrlRef = useRef<string | null>(null)
     useEffect(() => {
         activeItemUrlRef.current = activeItemUrl
@@ -228,6 +240,7 @@ export function YoutubeDownloader() {
             } else {
                 isDownloadingRef.current = false
                 setIsDownloading(false)
+                setActiveItemId(null)
                 setActiveItemUrl(null)
             }
 
@@ -267,11 +280,10 @@ export function YoutubeDownloader() {
 
             setItems((prev) =>
                 prev.map((item) => {
-                    if (
-                        activeItemUrlRef.current
-                            ? item.url === activeItemUrlRef.current
-                            : item.status === 'Downloading'
-                    ) {
+                    const isMatch = activeItemIdRef.current
+                        ? item.id === activeItemIdRef.current
+                        : item.status === 'Downloading'
+                    if (isMatch) {
                         const newPercent = normalizeProgressPercent(
                             data.percent,
                         )
@@ -302,11 +314,10 @@ export function YoutubeDownloader() {
 
             setItems((prev) =>
                 prev.map((item) => {
-                    if (
-                        activeItemUrlRef.current
-                            ? item.url === activeItemUrlRef.current
-                            : item.status === 'Downloading'
-                    ) {
+                    const isMatch = activeItemIdRef.current
+                        ? item.id === activeItemIdRef.current
+                        : item.status === 'Downloading'
+                    if (isMatch) {
                         if (data.status === 'completed') {
                             return {
                                 ...item,
@@ -426,70 +437,158 @@ export function YoutubeDownloader() {
         void window.api.youtube.signOut()
     }
 
-    const handleAddUrl = async () => {
-        const cleanUrl = inputUrl.trim()
-        if (!cleanUrl) return
-
-        const targetVidId = extractVideoId(cleanUrl)
-        const alreadyExists = items.some((i) => {
-            if (i.url === cleanUrl) return true
-            const itemVidId = extractVideoId(i.url)
-            return Boolean(
-                targetVidId && itemVidId && targetVidId === itemVidId,
-            )
-        })
-
-        if (alreadyExists) {
-            setError('This video is already in your download list.')
-            return
+    const handleAddSingleVideo = ({
+        url,
+        info,
+        quality,
+        section,
+    }: {
+        url: string
+        info: YoutubeVideoInfo
+        quality: string
+        section?: { startSeconds: number; endSeconds: number }
+    }) => {
+        const newItem: DownloadItem = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name: info.title,
+            url,
+            type: 'video',
+            isSingleUrl: true,
+            channelName: info.author,
+            quality: quality || defaultQuality || 'Best',
+            size: 'Calculating...',
+            status: 'Queued',
+            percent: 0,
+            timeLeft: '--',
+            dateModified: formatDate(new Date()),
+            selected: true,
+            section,
         }
+
+        setItems((prev) => [newItem, ...prev])
+        setSelectedByFilter((prev) => {
+            const currentSet = new Set(prev[activeFilter] || [])
+            currentSet.add(newItem.id)
+            return { ...prev, [activeFilter]: currentSet }
+        })
+        setInputUrl('')
+        setShowAddUrlModal(false)
+        setClipTargetUrl(null)
+    }
+
+    const handleAddBulkUrls = async (urls: string[]) => {
+        if (urls.length === 0) return
 
         setLoadingInfo(true)
         setError(null)
 
         try {
-            const type = await window.api.youtube.getUrlType(cleanUrl)
+            const existingUrls = new Set(items.map((i) => i.url))
+            const existingVideoIds = new Set(
+                items
+                    .map((i) => extractVideoId(i.url))
+                    .filter(Boolean) as string[],
+            )
 
-            if (type === 'video') {
-                const info = await window.api.youtube.getInfo(cleanUrl)
-                const newItem: DownloadItem = {
-                    id: String(Date.now()),
-                    name: info.title,
-                    url: cleanUrl,
-                    type: 'video',
-                    isSingleUrl: true,
-                    channelName: info.author,
-                    quality: defaultQuality || 'Best',
-                    size: 'Calculating...',
-                    status: 'Queued',
-                    percent: 0,
-                    timeLeft: '--',
-                    dateModified: formatDate(new Date()),
-                    selected: true,
+            const urlsToAdd: string[] = []
+            for (const url of urls) {
+                const vidId = extractVideoId(url)
+                if (
+                    existingUrls.has(url) ||
+                    (vidId && existingVideoIds.has(vidId))
+                ) {
+                    continue
                 }
-                setItems((prev) => [newItem, ...prev])
-                setSelectedByFilter((prev) => {
-                    const currentSet = new Set(prev[activeFilter] || [])
-                    currentSet.add(newItem.id)
-                    return { ...prev, [activeFilter]: currentSet }
-                })
-            } else if (type === 'channel') {
-                setIsFetchingVideos(true)
-                // Await initial batch loading before closing dialog
-                await window.api.youtube.getChannelPage(cleanUrl, 1, 20)
-                setInputUrl('')
-                setShowAddUrlModal(false)
+                urlsToAdd.push(url)
+            }
+
+            if (urlsToAdd.length === 0) {
+                setError(
+                    urls.length === 1
+                        ? 'This video is already in your download list.'
+                        : 'All specified URLs are already in your download list.',
+                )
+                setLoadingInfo(false)
                 return
             }
 
-            setInputUrl('')
-            setShowAddUrlModal(false)
+            const newItems: DownloadItem[] = []
+            const errors: string[] = []
+            let hasChannel = false
+
+            await Promise.all(
+                urlsToAdd.map(async (cleanUrl) => {
+                    try {
+                        const type =
+                            await window.api.youtube.getUrlType(cleanUrl)
+
+                        if (type === 'video') {
+                            const info =
+                                await window.api.youtube.getInfo(cleanUrl)
+                            const newItem: DownloadItem = {
+                                id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                                name: info.title,
+                                url: cleanUrl,
+                                type: 'video',
+                                isSingleUrl: true,
+                                channelName: info.author,
+                                quality: defaultQuality || 'Best',
+                                size: 'Calculating...',
+                                status: 'Queued',
+                                percent: 0,
+                                timeLeft: '--',
+                                dateModified: formatDate(new Date()),
+                                selected: true,
+                            }
+                            newItems.push(newItem)
+                        } else if (type === 'channel') {
+                            hasChannel = true
+                            setIsFetchingVideos(true)
+                            await window.api.youtube.getChannelPage(
+                                cleanUrl,
+                                1,
+                                20,
+                            )
+                        }
+                    } catch (err: any) {
+                        errors.push(
+                            err?.message || `Failed to fetch: ${cleanUrl}`,
+                        )
+                    }
+                }),
+            )
+
+            if (newItems.length > 0) {
+                setItems((prev) => [...newItems, ...prev])
+                setSelectedByFilter((prev) => {
+                    const currentSet = new Set(prev[activeFilter] || [])
+                    for (const item of newItems) {
+                        currentSet.add(item.id)
+                    }
+                    return { ...prev, [activeFilter]: currentSet }
+                })
+            }
+
+            if (newItems.length > 0 || hasChannel) {
+                setInputUrl('')
+                setShowAddUrlModal(false)
+                setClipTargetUrl(null)
+            } else if (errors.length > 0) {
+                setIsFetchingVideos(false)
+                setError(errors[0])
+            }
         } catch (err: any) {
             setIsFetchingVideos(false)
             setError(err?.message || 'Failed to fetch YouTube info')
         } finally {
             setLoadingInfo(false)
         }
+    }
+
+    const handleClipItem = (item: DownloadItem) => {
+        setClipTargetUrl(item.url)
+        setClipTargetSection(item.section || null)
+        setShowAddUrlModal(true)
     }
 
     useEffect(() => {
@@ -571,6 +670,7 @@ export function YoutubeDownloader() {
         activeRunIdRef.current += 1
         isDownloadingRef.current = false
         setIsDownloading(false)
+        setActiveItemId(null)
         setActiveItemUrl(null)
     }
 
@@ -579,6 +679,7 @@ export function YoutubeDownloader() {
         activeRunIdRef.current = runId
         isDownloadingRef.current = true
         setIsDownloading(true)
+        setActiveItemId(item.id)
         setActiveItemUrl(item.url)
         setItems((prev) =>
             prev.map((i) => (i.id === item.id ? toDownloadingItem(i) : i)),
@@ -666,6 +767,7 @@ export function YoutubeDownloader() {
             if (activeRunIdRef.current !== runId) return
             isDownloadingRef.current = true
             setIsDownloading(true)
+            setActiveItemId(item.id)
             setActiveItemUrl(item.url)
 
             setItems((prev) =>
@@ -673,7 +775,17 @@ export function YoutubeDownloader() {
             )
 
             if (item.type === 'video') {
-                const sanitized = sanitizeFilename(item.name)
+                let sectionSuffix = ''
+                if (item.section) {
+                    const startStr = formatTimeCode(
+                        item.section.startSeconds,
+                    ).replace(/:/g, '.')
+                    const endStr = formatTimeCode(
+                        item.section.endSeconds,
+                    ).replace(/:/g, '.')
+                    sectionSuffix = ` [${startStr}-${endStr}]`
+                }
+                const sanitized = `${sanitizeFilename(item.name)}${sectionSuffix}`
                 const isAudio = item.quality?.toLowerCase().includes('audio')
                 const isThumbnail = item.quality
                     ?.toLowerCase()
@@ -714,6 +826,7 @@ export function YoutubeDownloader() {
                         height: heightVal,
                         downloadThumbnail: downloadThumbnailsRef.current,
                         rootDownloadDir: targetDir,
+                        section: item.section,
                     })
                 }
 
@@ -804,6 +917,7 @@ export function YoutubeDownloader() {
             if (activeRunIdRef.current === runId) {
                 isDownloadingRef.current = false
                 setIsDownloading(false)
+                setActiveItemId(null)
                 setActiveItemUrl(null)
             }
         }
@@ -1088,6 +1202,7 @@ export function YoutubeDownloader() {
                         onStartItem={(id) => handleStartSelectedDownloads(id)}
                         onStopItem={handleStopItem}
                         onDeleteItem={handleDeleteItem}
+                        onClipItem={handleClipItem}
                         onOpenFolder={handleOpenFolder}
                         onSignIn={handleOpenSignIn}
                         isFetchingVideos={isFetchingVideos}
@@ -1104,14 +1219,30 @@ export function YoutubeDownloader() {
             {/* Modals */}
             <AddUrlModal
                 open={showAddUrlModal}
-                onOpenChange={setShowAddUrlModal}
+                onOpenChange={(open) => {
+                    setShowAddUrlModal(open)
+                    if (!open) {
+                        setClipTargetUrl(null)
+                        setClipTargetSection(null)
+                        setInputUrl('')
+                        setError(null)
+                    }
+                }}
                 inputUrl={inputUrl}
                 setInputUrl={setInputUrl}
                 loadingInfo={loadingInfo}
                 error={error}
+                defaultQuality={defaultQuality}
                 signInStatus={signInStatus}
                 onSignIn={handleOpenSignIn}
-                onSubmit={handleAddUrl}
+                onSubmitBulk={handleAddBulkUrls}
+                onSubmitSingle={handleAddSingleVideo}
+                initialClipUrl={clipTargetUrl}
+                initialClipSection={clipTargetSection}
+                onClearInitialClipUrl={() => {
+                    setClipTargetUrl(null)
+                    setClipTargetSection(null)
+                }}
             />
 
             <DownloadOptionsModal

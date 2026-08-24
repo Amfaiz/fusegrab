@@ -87,6 +87,12 @@ const config = {
             // electron-packager defaults continueOnError to true and silently
             // continues with an unsigned app when signing fails. Fail loudly.
             continueOnError: false,
+            entitlements: './build/entitlements.mac.plist',
+            entitlementsInherit: './build/entitlements.mac.inherit.plist',
+            optionsForFile: () => ({
+                entitlements: './build/entitlements.mac.plist',
+                hardenedRuntime: true,
+            }),
         },
         osxNotarize: {
             tool: 'notarytool',

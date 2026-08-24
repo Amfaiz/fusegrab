@@ -36,6 +36,12 @@ export type {
 export { destroyScraperWindows } from './channel-scraper'
 export { prewarmYoutubeBinaries } from './binary'
 export { openYoutubeSignIn } from './sign-in'
+export {
+    areAllValidYoutubeUrls,
+    getInvalidYoutubeUrls,
+    isValidYoutubeUrl,
+    parseYoutubeUrls,
+} from './url'
 
 // A video download may run a companion thumbnail download in parallel, so
 // cancel must kill every active yt-dlp child process, not just one.

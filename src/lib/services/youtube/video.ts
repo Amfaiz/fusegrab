@@ -391,6 +391,7 @@ export async function downloadYoutubeVideo(
         savePath,
         qualityItag,
         height,
+        section: options.section,
     })
 
     const cleanUrl = url.trim()
@@ -417,6 +418,20 @@ export async function downloadYoutubeVideo(
         logger.warn(
             'ffmpeg binary not found. Falling back to a single pre-merged format; quality may be lower than requested.',
         )
+    }
+
+    if (options.section) {
+        const { startSeconds, endSeconds } = options.section
+        const start = Math.max(0, Math.floor(startSeconds))
+        const end = Math.floor(endSeconds)
+        if (end > start || start > 0) {
+            const sectionSpec = `*${start}-${end > start ? end : 'inf'}`
+            baseArgs.push('--download-sections', sectionSpec)
+            if (resolvedFfmpegPath) {
+                baseArgs.push('--force-keyframes-at-cuts')
+            }
+            logger.info(`Clipping video section: ${sectionSpec}`)
+        }
     }
 
     const isAudioOnly =
@@ -482,8 +497,7 @@ export async function downloadYoutubeVideo(
     }
 
     logger.endDownload(downloadLabel, false)
-    const failure =
-        botCheckError ?? firstOtherError ?? lastError ?? null
+    const failure = botCheckError ?? firstOtherError ?? lastError ?? null
     if (!failure) throw new Error('Video download failed')
     throw new Error(humanizeSessionError(failure.message) ?? failure.message)
 }

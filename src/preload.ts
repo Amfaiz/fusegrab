@@ -66,6 +66,10 @@ contextBridge.exposeInMainWorld('api', {
             height?: number
             rootDownloadDir?: string
             downloadThumbnail?: boolean
+            section?: {
+                startSeconds: number
+                endSeconds: number
+            }
         }) => ipcRenderer.invoke('youtube:download', options),
         downloadThumbnail: (options: {
             url: string

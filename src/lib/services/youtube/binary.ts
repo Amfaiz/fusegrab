@@ -574,8 +574,6 @@ async function resolveFfmpegBinary(
     return null
 }
 
-
-
 /**
  * A Chrome UA that matches the machine the app actually runs on — and the
  * Chromium version the app actually ships. Google's sign-in flow fingerprints
@@ -641,6 +639,36 @@ let cachedJsRuntime: string | null | undefined
  * Resolve an absolute path instead, and omit the flag entirely rather than
  * pointing yt-dlp at a runtime that isn't there.
  */
+/**
+ * Smoke-tests a candidate JS runtime executable to ensure it doesn't immediately
+ * crash (e.g. Deno panic Check failed: 12 on macOS x86_64 without JIT entitlement).
+ */
+export async function verifyJsRuntime(
+    binaryPath: string | null | undefined,
+    args: string[],
+    logger?: SessionLogger,
+): Promise<boolean> {
+    if (!hasUsableBinary(binaryPath)) return false
+    return new Promise<boolean>((resolve) => {
+        execFile(
+            binaryPath,
+            args,
+            { ...NO_WINDOW, timeout: 3000 },
+            (err, _stdout, stderr) => {
+                if (err) {
+                    const msg = (err.message || stderr || '').trim()
+                    logger?.warn(
+                        `JS runtime smoke test failed for ${binaryPath}: ${msg}`,
+                    )
+                    resolve(false)
+                } else {
+                    resolve(true)
+                }
+            },
+        )
+    })
+}
+
 async function resolveJsRuntime(
     logger?: SessionLogger,
 ): Promise<string | null> {
@@ -683,7 +711,7 @@ async function resolveJsRuntime(
     candidates.push(...NODE_FALLBACK_PATHS)
 
     for (const candidate of uniquePaths(candidates)) {
-        if (hasUsableBinary(candidate)) {
+        if (await verifyJsRuntime(candidate, ['-e', '1'], logger)) {
             logger?.info(
                 `Using JS runtime for YouTube challenges: ${candidate}`,
             )
@@ -908,18 +936,29 @@ export async function ensureDenoBinary(
         if (process.platform !== 'win32') {
             await chmod(bundledPath, 0o755).catch(() => undefined)
         }
-        logger?.info(`Using bundled deno JS runtime at: ${bundledPath}`)
-        cachedDenoPath = bundledPath
-        return bundledPath
+        if (await verifyJsRuntime(bundledPath, ['eval', '1'], logger)) {
+            logger?.info(`Using bundled deno JS runtime at: ${bundledPath}`)
+            cachedDenoPath = bundledPath
+            return bundledPath
+        }
+        logger?.warn(
+            `Bundled deno at ${bundledPath} failed smoke test (e.g. missing JIT entitlements or OS incompatibility). Bypassing bundled binary.`,
+        )
     }
 
     const binDir = path.join(app.getPath('userData'), 'bin')
     const binPath = path.join(binDir, getDenoBinaryName())
 
     if (hasUsableBinary(binPath)) {
-        logger?.info(`Found cached deno JS runtime at: ${binPath}`)
-        cachedDenoPath = binPath
-        return binPath
+        if (await verifyJsRuntime(binPath, ['eval', '1'], logger)) {
+            logger?.info(`Found cached deno JS runtime at: ${binPath}`)
+            cachedDenoPath = binPath
+            return binPath
+        }
+        logger?.warn(
+            `Cached deno at ${binPath} failed smoke test. Purging corrupted binary.`,
+        )
+        await rm(binPath, { force: true }).catch(() => undefined)
     }
 
     const asset = getDenoDownloadAsset()
@@ -957,9 +996,15 @@ export async function ensureDenoBinary(
 
         const installed = await extractDenoArchive(archivePath, binDir, logger)
         if (installed) {
-            logger?.info(`deno JS runtime installed at ${installed}`)
-            cachedDenoPath = installed
-            return installed
+            if (await verifyJsRuntime(installed, ['eval', '1'], logger)) {
+                logger?.info(`deno JS runtime installed at ${installed}`)
+                cachedDenoPath = installed
+                return installed
+            }
+            logger?.warn(
+                `Downloaded deno at ${installed} failed smoke test. Purging binary.`,
+            )
+            await rm(installed, { force: true }).catch(() => undefined)
         }
     } catch (err: any) {
         logger?.warn(

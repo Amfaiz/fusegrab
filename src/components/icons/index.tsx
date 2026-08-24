@@ -3,6 +3,7 @@ import type { HugeiconsIconProps } from '@hugeicons/react'
 import {
     Add01Icon,
     ArrowDown01Icon,
+    ArrowLeft01Icon,
     Cancel01Icon,
     Delete02Icon,
     Download04Icon,
@@ -17,6 +18,7 @@ import {
     PlayIcon,
     RefreshIcon,
     Remove01Icon,
+    Scissor01Icon,
     Search01Icon,
     Settings01Icon,
     Tick02Icon,
@@ -41,6 +43,7 @@ export const Plus = makeIcon(Add01Icon)
 export const Check = makeIcon(Tick02Icon)
 export const UserCircle = makeIcon(UserCircle02Icon)
 export const ChevronDownIcon = makeIcon(ArrowDown01Icon)
+export const ArrowLeft = makeIcon(ArrowLeft01Icon)
 export const Download = makeIcon(Download04Icon)
 export const ExternalLink = makeIcon(LinkSquare02Icon)
 export const Video = makeIcon(Video02Icon)
@@ -56,6 +59,7 @@ export const MoreHorizontal = makeIcon(MoreHorizontalSquareIcon)
 export const Pause = makeIcon(PauseIcon)
 export const Play = makeIcon(PlayIcon)
 export const RefreshCw = makeIcon(RefreshIcon)
+export const Scissors = makeIcon(Scissor01Icon)
 export const Search = makeIcon(Search01Icon)
 export const Settings = makeIcon(Settings01Icon)
 export const Trash2 = makeIcon(Delete02Icon)

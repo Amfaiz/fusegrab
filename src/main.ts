@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -296,6 +296,45 @@ app.on('second-instance', () => {
     } else {
         createWindow()
     }
+})
+
+// Enable standard context menu (Undo, Redo, Cut, Copy, Paste, Delete, Select All)
+// on editable inputs and text selections.
+app.on('web-contents-created', (_event, contents) => {
+    if (contents.getType() === 'offscreen') return
+
+    contents.on('context-menu', (_ctxEvent, params) => {
+        const { isEditable, selectionText } = params
+        const win =
+            BrowserWindow.fromWebContents(contents) ??
+            BrowserWindow.getFocusedWindow() ??
+            undefined
+
+        if (isEditable) {
+            const menu = Menu.buildFromTemplate([
+                { role: 'undo' },
+                { role: 'redo' },
+                { type: 'separator' },
+                { role: 'cut' },
+                { role: 'copy' },
+                { role: 'paste' },
+                { role: 'delete' },
+                { type: 'separator' },
+                { role: 'selectAll' },
+            ])
+            menu.popup(win ? { window: win } : {})
+            return
+        }
+
+        if (selectionText && selectionText.trim().length > 0) {
+            const menu = Menu.buildFromTemplate([
+                { role: 'copy' },
+                { role: 'selectAll' },
+            ])
+            menu.popup(win ? { window: win } : {})
+            return
+        }
+    })
 })
 
 // Wraps ipcMain.handle so every handler's rejection is normalized before it

@@ -26,6 +26,48 @@ export interface DownloadItem {
     savePath?: string
     selected: boolean
     retryCount?: number
+    section?: {
+        startSeconds: number
+        endSeconds: number
+    }
+}
+
+export function formatTimeCode(
+    totalSeconds: number,
+    forceHours = false,
+): string {
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '00:00'
+    const s = Math.floor(totalSeconds)
+    const hours = Math.floor(s / 3600)
+    const minutes = Math.floor((s % 3600) / 60)
+    const seconds = s % 60
+
+    if (hours > 0 || forceHours) {
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    }
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+export function parseTimeCode(timeStr: string): number | null {
+    if (!timeStr || typeof timeStr !== 'string') return null
+    const cleaned = timeStr.trim()
+    const parts = cleaned.split(/[:.]/).map((p) => Number(p.trim()))
+    if (parts.some((p) => Number.isNaN(p) || p < 0)) return null
+
+    if (parts.length === 1) {
+        return parts[0]
+    }
+    if (parts.length === 2) {
+        const [minutes, seconds] = parts
+        if (seconds >= 60) return null
+        return minutes * 60 + seconds
+    }
+    if (parts.length === 3) {
+        const [hours, minutes, seconds] = parts
+        if (minutes >= 60 || seconds >= 60) return null
+        return hours * 3600 + minutes * 60 + seconds
+    }
+    return null
 }
 
 export function sanitizeFilename(name: string): string {

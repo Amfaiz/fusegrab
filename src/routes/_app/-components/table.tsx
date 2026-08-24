@@ -7,13 +7,14 @@ import {
     Download,
     Folder,
     FolderOpen,
-    Youtube,
     MoreHorizontal,
     Pause,
     Play,
     RefreshCw,
+    Scissors,
     Trash2,
     Video,
+    Youtube,
 } from '#/components/icons'
 import { Checkbox } from '#/components/ui/checkbox'
 import {
@@ -33,7 +34,7 @@ import {
 } from '#/components/ui/select'
 
 import { isBotCheckError } from './retry'
-import { getStatusText } from './types'
+import { formatTimeCode, getStatusText } from './types'
 
 /**
  * `Retry` is amber rather than red: the item is still going to be attempted, so
@@ -84,6 +85,7 @@ interface DownloaderTableProps {
     onStartItem: (id: string) => void
     onStopItem: (id: string) => void
     onDeleteItem?: (id: string) => void
+    onClipItem?: (item: DownloadItem) => void
     onOpenFolder?: (item: DownloadItem) => void
     onSignIn?: () => void
     isFetchingVideos?: boolean
@@ -100,6 +102,7 @@ export function DownloaderTable({
     onStartItem,
     onStopItem,
     onDeleteItem,
+    onClipItem,
     onOpenFolder,
     onSignIn,
     isFetchingVideos,
@@ -264,12 +267,31 @@ export function DownloaderTable({
                                                 <Video className="text-primary h-4 w-4 shrink-0" />
                                             )}
                                             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                                                <span
-                                                    className="text-foreground block truncate text-xs font-medium"
-                                                    title={item.name}
-                                                >
-                                                    {item.name}
-                                                </span>
+                                                <div className="flex min-w-0 items-center gap-1.5">
+                                                    <span
+                                                        className="text-foreground block truncate text-xs font-medium"
+                                                        title={item.name}
+                                                    >
+                                                        {item.name}
+                                                    </span>
+                                                    {item.section && (
+                                                        <span
+                                                            className="bg-primary/10 text-primary border-primary/25 inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+                                                            title={`Clip section: ${formatTimeCode(item.section.startSeconds)} - ${formatTimeCode(item.section.endSeconds)}`}
+                                                        >
+                                                            <Scissors className="size-2.5" />
+                                                            {formatTimeCode(
+                                                                item.section
+                                                                    .startSeconds,
+                                                            )}{' '}
+                                                            -{' '}
+                                                            {formatTimeCode(
+                                                                item.section
+                                                                    .endSeconds,
+                                                            )}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 {item.channelName && (
                                                     <span className="text-muted-foreground block truncate text-[10px]">
                                                         {item.channelName}
@@ -513,6 +535,25 @@ export function DownloaderTable({
                                                         </MenuItem>
                                                     </>
                                                 ) : null}
+                                                {item.type === 'video' &&
+                                                    onClipItem && (
+                                                        <>
+                                                            <MenuSeparator />
+                                                            <MenuItem
+                                                                onClick={() =>
+                                                                    onClipItem(
+                                                                        item,
+                                                                    )
+                                                                }
+                                                            >
+                                                                <Scissors className="text-primary h-3.5 w-3.5" />
+                                                                <span>
+                                                                    Trim / Clip
+                                                                    Section
+                                                                </span>
+                                                            </MenuItem>
+                                                        </>
+                                                    )}
                                                 <MenuSeparator />
                                                 <MenuItem
                                                     onClick={() => {

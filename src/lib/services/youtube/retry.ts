@@ -12,13 +12,20 @@ export interface YtDlpAttempt {
 }
 
 /**
- * Errors that mean "YouTube is fighting this request" rather than "this video
- * does not exist". Only these trigger the fallback ladder, so a genuinely
- * unavailable video fails fast instead of pointlessly retrying.
+ * Errors that mean "YouTube is fighting this request" or a challenge solver failed
+ * rather than "this video does not exist". Only these trigger the fallback ladder,
+ * so a genuinely unavailable video fails fast instead of pointlessly retrying.
  */
 const BOT_CHECK_PATTERN = /Sign in to confirm you(?:'re| are) not a bot/i
+const JS_RUNTIME_ERROR_PATTERN =
+    /Error solving n challenge request|Deno has panicked|Check failed: 12|The page needs to be reloaded|n challenge solving failed/i
 
-const RETRY_PATTERNS = [BOT_CHECK_PATTERN, /HTTP Error 429/i, /HTTP Error 403/i]
+const RETRY_PATTERNS = [
+    BOT_CHECK_PATTERN,
+    /HTTP Error 429/i,
+    /HTTP Error 403/i,
+    JS_RUNTIME_ERROR_PATTERN,
+]
 
 export function shouldRetryWithAlternative(errorMsg: string): boolean {
     return RETRY_PATTERNS.some((pattern) => pattern.test(errorMsg))
@@ -50,6 +57,12 @@ export function humanizeSessionError(errorMsg: string): string | null {
             'YouTube refused this request (403). This usually means the session ' +
             'was rejected — sign out and sign back in from the account menu, ' +
             'then retry.'
+        )
+    }
+    if (JS_RUNTIME_ERROR_PATTERN.test(errorMsg)) {
+        return (
+            'YouTube player challenge solver failed. ' +
+            'Please verify that a working JavaScript runtime (Deno or Node.js) is available.'
         )
     }
     return null

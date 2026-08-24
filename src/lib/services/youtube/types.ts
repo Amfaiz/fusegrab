@@ -43,6 +43,10 @@ export interface DownloadOptions {
     height?: number
     rootDownloadDir?: string
     downloadThumbnail?: boolean
+    section?: {
+        startSeconds: number
+        endSeconds: number
+    }
 }
 
 export interface DownloadChannelOptions {

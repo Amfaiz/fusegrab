@@ -47,3 +47,18 @@ describe('ytDlpVersionNeedsUpdate', () => {
         )
     })
 })
+
+describe('verifyJsRuntime', () => {
+    it('returns false for null or non-existent binary paths', async () => {
+        const { verifyJsRuntime } = await import('./binary')
+        expect(await verifyJsRuntime(null, ['eval', '1'])).toBe(false)
+        expect(
+            await verifyJsRuntime('/non/existent/path/deno', ['eval', '1']),
+        ).toBe(false)
+    })
+
+    it('validates a real working runtime like process.execPath', async () => {
+        const { verifyJsRuntime } = await import('./binary')
+        expect(await verifyJsRuntime(process.execPath, ['-e', '1'])).toBe(true)
+    })
+})
