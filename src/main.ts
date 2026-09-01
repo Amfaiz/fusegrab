@@ -43,6 +43,7 @@ import {
     getYoutubeChannelPage,
     getYoutubeUrlType,
     getYoutubeVideoInfo,
+    getYoutubeQuickInfo,
     prewarmYoutubeBinaries,
 } from './lib/services/youtube/service'
 import {
@@ -417,6 +418,9 @@ handle('app:get-version', () => app.getVersion())
 
 handle('youtube:get-info', (event, url: string) =>
     getYoutubeVideoInfo(url, BrowserWindow.fromWebContents(event.sender)),
+)
+handle('youtube:get-quick-info', (event, url: string) =>
+    getYoutubeQuickInfo(url, BrowserWindow.fromWebContents(event.sender)),
 )
 handle('youtube:get-url-type', (_event, url: string) => getYoutubeUrlType(url))
 handle(

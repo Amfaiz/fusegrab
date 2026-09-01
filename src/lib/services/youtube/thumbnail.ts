@@ -200,11 +200,15 @@ export async function downloadYoutubeThumbnail(
     logger.info(`yt-dlp binary located at: ${ytDlpPath}`)
     logger.info(`Strategies: ${attempts.map((a) => a.label).join(' → ')}`)
 
+    // Clear any previous thumbnail file so yt-dlp starts a fresh download
+    await rmThumbnailFiles(savePath)
+
     const baseArgs: string[] = [
         '--newline',
         '--no-playlist',
         '--skip-download',
         '--write-thumbnail',
+        '--force-overwrites',
     ]
 
     if (resolvedFfmpegPath) {

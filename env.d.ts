@@ -28,6 +28,7 @@ declare global {
             }
             youtube: {
                 getInfo: (url: string) => Promise<YoutubeVideoInfo>
+                getQuickInfo: (url: string) => Promise<YoutubeVideoInfo>
                 getUrlType: (url: string) => Promise<'video' | 'channel'>
                 getChannelPage: (
                     url: string,

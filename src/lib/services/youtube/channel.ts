@@ -58,7 +58,7 @@ export async function getYoutubeUrlType(
 
     const [ytDlpPath, attempts] = await Promise.all([
         ensureYtDlpBinary(),
-        buildYtDlpAttempts(),
+        buildYtDlpAttempts(undefined, undefined, false),
     ])
     try {
         const stdout = await runJsonAttempts(ytDlpPath, attempts, [

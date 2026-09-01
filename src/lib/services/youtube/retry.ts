@@ -85,11 +85,12 @@ export function shouldContinueToNextAttempt(errorMsg: string): boolean {
 export async function buildYtDlpAttempts(
     win?: BrowserWindow | null,
     logger?: SessionLogger,
+    isDownload = true,
 ): Promise<YtDlpAttempt[]> {
     // Resolve both in parallel: the anti-rate-limit args (cookie jar)
     // and the JS runtime (deno) are independent of each other.
     const [baseArgs, jsRuntimeArgs] = await Promise.all([
-        getAntiRateLimitArgs(win, logger),
+        getAntiRateLimitArgs(win, logger, isDownload),
         getJsRuntimeArgs(logger),
     ])
 

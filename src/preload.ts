@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld('api', {
     },
     youtube: {
         getInfo: (url: string) => ipcRenderer.invoke('youtube:get-info', url),
+        getQuickInfo: (url: string) =>
+            ipcRenderer.invoke('youtube:get-quick-info', url),
         getUrlType: (url: string) =>
             ipcRenderer.invoke('youtube:get-url-type', url) as Promise<
                 'video' | 'channel'

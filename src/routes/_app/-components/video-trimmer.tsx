@@ -20,6 +20,8 @@ import {
     SelectValue,
 } from '#/components/ui/select'
 
+import { extractYoutubeVideoId } from '#/lib/services/youtube/url'
+
 import { formatTimeCode, parseTimeCode } from './types'
 
 interface VideoTrimmerProps {
@@ -35,14 +37,6 @@ interface VideoTrimmerProps {
     loading?: boolean
 }
 
-function extractYoutubeVideoId(url: string): string | null {
-    if (!url) return null
-    const match = url.match(
-        /(?:watch\?v=|youtu\.be\/|\/shorts\/|\/embed\/)([a-zA-Z0-9_-]{11})/,
-    )
-    return match ? match[1] : null
-}
-
 export function VideoTrimmer({
     url,
     info,
@@ -53,7 +47,26 @@ export function VideoTrimmer({
     loading = false,
 }: VideoTrimmerProps) {
     const videoId = extractYoutubeVideoId(url)
-    const totalDuration = Math.max(1, Math.round(info.durationSeconds || 60))
+    const initialDuration = Math.max(
+        1,
+        Math.round(
+            info.durationSeconds || initialSection?.endSeconds || 60,
+        ),
+    )
+    const [totalDuration, setTotalDuration] = useState(initialDuration)
+
+    useEffect(() => {
+        if (info.durationSeconds && info.durationSeconds > 0) {
+            const dur = Math.max(1, Math.round(info.durationSeconds))
+            setTotalDuration(dur)
+            setEndSeconds((prevEnd) => {
+                if (!initialSection && (prevEnd === 60 || prevEnd > dur)) {
+                    return dur
+                }
+                return Math.min(dur, prevEnd)
+            })
+        }
+    }, [info.durationSeconds, initialSection])
 
     const initStart =
         initialSection?.startSeconds !== undefined
@@ -165,18 +178,45 @@ export function VideoTrimmer({
 
                 if (!data || typeof data !== 'object') return
 
-                if (
-                    data.event === 'infoDelivery' &&
-                    data.info &&
-                    typeof data.info.currentTime === 'number'
-                ) {
-                    const time = data.info.currentTime
-                    setCurrentTime(time)
+                if (data.event === 'infoDelivery' && data.info) {
+                    const reportedDuration =
+                        typeof data.info.duration === 'number'
+                            ? data.info.duration
+                            : typeof data.info.progressState?.duration ===
+                                'number'
+                              ? data.info.progressState.duration
+                              : null
 
-                    // If playback reached end of range, stop and reset to start
-                    if (time >= endSecondsRef.current) {
-                        pauseVideo()
-                        seekTo(startSecondsRef.current)
+                    if (reportedDuration && reportedDuration > 0) {
+                        const dur = Math.max(1, Math.round(reportedDuration))
+                        setTotalDuration((prevDur) => {
+                            if (prevDur !== dur) {
+                                setEndSeconds((prevEnd) => {
+                                    if (
+                                        !initialSection &&
+                                        (prevEnd === prevDur ||
+                                            prevEnd === 60 ||
+                                            prevEnd > dur)
+                                    ) {
+                                        return dur
+                                    }
+                                    return Math.min(dur, prevEnd)
+                                })
+                                return dur
+                            }
+                            return prevDur
+                        })
+                    }
+
+                    if (typeof data.info.currentTime === 'number') {
+                        const time = data.info.currentTime
+                        setCurrentTime(time)
+
+                        // If playback reached end of range, stop and reset to start
+                        if (time >= endSecondsRef.current) {
+                            pauseVideo()
+                            seekTo(startSecondsRef.current)
+                        }
                     }
                 }
 
@@ -230,19 +270,6 @@ export function VideoTrimmer({
         setStartSeconds(0)
         setEndSeconds(totalDuration)
         seekTo(0)
-    }
-
-    const handleSetStartToCurrent = () => {
-        const newStart = Math.max(0, Math.min(currentTime, endSeconds - 1))
-        setStartSeconds(Math.round(newStart))
-    }
-
-    const handleSetEndToCurrent = () => {
-        const newEnd = Math.min(
-            totalDuration,
-            Math.max(currentTime, startSeconds + 1),
-        )
-        setEndSeconds(Math.round(newEnd))
     }
 
     const handleStartInputBlur = () => {

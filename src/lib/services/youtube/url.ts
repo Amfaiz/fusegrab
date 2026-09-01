@@ -112,3 +112,31 @@ export function getInvalidYoutubeUrls(
     const urls = parseYoutubeUrls(input)
     return urls.filter((url) => !isValidYoutubeUrl(url))
 }
+
+/**
+ * Extracts an 11-character YouTube video ID from various YouTube URL formats.
+ */
+export function extractYoutubeVideoId(
+    url: string | null | undefined,
+): string | null {
+    if (!url) return null
+    const trimmed = url.trim()
+    if (!trimmed) return null
+
+    const match = trimmed.match(
+        /(?:watch\?v=|youtu\.be\/|\/(?:shorts|embed|live|v)\/)([a-zA-Z0-9_-]{11})/i,
+    )
+    if (match && match[1]) return match[1]
+
+    try {
+        const withProto = /^https?:\/\//i.test(trimmed)
+            ? trimmed
+            : `https://${trimmed}`
+        const parsed = new URL(withProto)
+        const v = parsed.searchParams.get('v')
+        if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v
+    } catch {}
+
+    return null
+}
+

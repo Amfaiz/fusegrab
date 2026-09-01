@@ -16,6 +16,7 @@ import {
     getYoutubeChannelPage as getChannelPageImpl,
     getYoutubeUrlType as getUrlTypeImpl,
 } from './channel'
+import { getYoutubeQuickInfo as getQuickInfoImpl } from './quick-info'
 import { downloadYoutubeThumbnail as downloadThumbnailImpl } from './thumbnail'
 import {
     downloadYoutubeVideo as downloadVideoImpl,
@@ -38,6 +39,7 @@ export { prewarmYoutubeBinaries } from './binary'
 export { openYoutubeSignIn } from './sign-in'
 export {
     areAllValidYoutubeUrls,
+    extractYoutubeVideoId,
     getInvalidYoutubeUrls,
     isValidYoutubeUrl,
     parseYoutubeUrls,
@@ -152,6 +154,13 @@ export async function getYoutubeVideoInfo(
     win?: BrowserWindow | null,
 ): Promise<YoutubeVideoInfo> {
     return getVideoInfoImpl(url, win)
+}
+
+export async function getYoutubeQuickInfo(
+    url: string,
+    win?: BrowserWindow | null,
+): Promise<YoutubeVideoInfo> {
+    return getQuickInfoImpl(url, win)
 }
 
 export async function downloadYoutubeVideo(

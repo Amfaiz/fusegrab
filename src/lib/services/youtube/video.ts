@@ -50,7 +50,7 @@ export async function getYoutubeVideoInfo(
     // the startup pre-warm.
     const [ytDlpPath, attempts] = await Promise.all([
         ensureYtDlpBinary(),
-        buildYtDlpAttempts(win, logger),
+        buildYtDlpAttempts(win, logger, false),
     ])
     const stdout = await runJsonAttempts(
         ytDlpPath,
@@ -407,7 +407,16 @@ export async function downloadYoutubeVideo(
     logger.info(`Strategies: ${attempts.map((a) => a.label).join(' → ')}`)
     const canMerge = Boolean(resolvedFfmpegPath)
 
-    const baseArgs: string[] = ['--newline', '--no-mtime']
+    // Clear any previous target file or candidate extensions so yt-dlp starts a fresh download
+    await rm(savePath, { force: true }).catch(() => undefined)
+    await rm(savePath.replace(/\.mp4$/i, '.mkv'), { force: true }).catch(
+        () => undefined,
+    )
+    await rm(savePath.replace(/\.mp4$/i, '.webm'), { force: true }).catch(
+        () => undefined,
+    )
+
+    const baseArgs: string[] = ['--newline', '--no-mtime', '--force-overwrites']
 
     if (resolvedFfmpegPath) {
         baseArgs.push('--ffmpeg-location', resolvedFfmpegPath)

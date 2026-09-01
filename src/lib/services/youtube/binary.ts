@@ -1019,6 +1019,7 @@ export async function ensureDenoBinary(
 export async function getAntiRateLimitArgs(
     win?: BrowserWindow | null,
     logger?: SessionLogger,
+    isDownload = true,
 ): Promise<string[]> {
     const userAgent =
         (win && !win.isDestroyed() && win.webContents.getUserAgent()) ||
@@ -1035,17 +1036,16 @@ export async function getAntiRateLimitArgs(
         '15',
         '--retries',
         '5',
-        '--fragment-retries',
-        '5',
         '--file-access-retries',
         '3',
-        '--concurrent-fragments',
-        '5',
     ]
 
-    logger?.info(
-        'Using yt-dlp built-in concurrent fragment downloader (5 fragments)',
-    )
+    if (isDownload) {
+        args.push('--fragment-retries', '5', '--concurrent-fragments', '5')
+        logger?.info(
+            'Using yt-dlp built-in concurrent fragment downloader (5 fragments)',
+        )
+    }
 
     args.push(...(await getCookieJarArgs(logger)))
 

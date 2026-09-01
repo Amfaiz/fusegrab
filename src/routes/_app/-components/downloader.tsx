@@ -93,6 +93,11 @@ export function YoutubeDownloader() {
         startSeconds: number
         endSeconds: number
     } | null>(null)
+    const [clipTargetInfo, setClipTargetInfo] = useState<{
+        title?: string
+        author?: string
+        thumbnail?: string
+    } | null>(null)
     const [showOptionsModal, setShowOptionsModal] = useState(false)
     const [inputUrl, setInputUrl] = useState('')
     const [loadingInfo, setLoadingInfo] = useState(false)
@@ -474,6 +479,8 @@ export function YoutubeDownloader() {
         setInputUrl('')
         setShowAddUrlModal(false)
         setClipTargetUrl(null)
+        setClipTargetSection(null)
+        setClipTargetInfo(null)
     }
 
     const handleAddBulkUrls = async (urls: string[]) => {
@@ -524,7 +531,7 @@ export function YoutubeDownloader() {
 
                         if (type === 'video') {
                             const info =
-                                await window.api.youtube.getInfo(cleanUrl)
+                                await window.api.youtube.getQuickInfo(cleanUrl)
                             const newItem: DownloadItem = {
                                 id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                                 name: info.title,
@@ -588,6 +595,10 @@ export function YoutubeDownloader() {
     const handleClipItem = (item: DownloadItem) => {
         setClipTargetUrl(item.url)
         setClipTargetSection(item.section || null)
+        setClipTargetInfo({
+            title: item.name,
+            author: item.channelName,
+        })
         setShowAddUrlModal(true)
     }
 
@@ -737,13 +748,13 @@ export function YoutubeDownloader() {
                             retryCount: undefined,
                         }
                     }
-                    if (i.status !== 'Complete') {
-                        return {
-                            ...i,
-                            status: 'Queued',
-                            statusStage: undefined,
-                            retryCount: undefined,
-                        }
+                    return {
+                        ...i,
+                        status: 'Queued',
+                        percent: 0,
+                        speed: undefined,
+                        statusStage: undefined,
+                        retryCount: undefined,
                     }
                 }
                 return i
@@ -1224,6 +1235,7 @@ export function YoutubeDownloader() {
                     if (!open) {
                         setClipTargetUrl(null)
                         setClipTargetSection(null)
+                        setClipTargetInfo(null)
                         setInputUrl('')
                         setError(null)
                     }
@@ -1239,9 +1251,11 @@ export function YoutubeDownloader() {
                 onSubmitSingle={handleAddSingleVideo}
                 initialClipUrl={clipTargetUrl}
                 initialClipSection={clipTargetSection}
+                initialClipInfo={clipTargetInfo}
                 onClearInitialClipUrl={() => {
                     setClipTargetUrl(null)
                     setClipTargetSection(null)
+                    setClipTargetInfo(null)
                 }}
             />
 

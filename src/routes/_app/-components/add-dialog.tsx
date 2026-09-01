@@ -43,6 +43,11 @@ interface AddUrlModalProps {
     onSignIn?: () => void
     initialClipUrl?: string | null
     initialClipSection?: { startSeconds: number; endSeconds: number } | null
+    initialClipInfo?: {
+        title?: string
+        author?: string
+        thumbnail?: string
+    } | null
     onClearInitialClipUrl?: () => void
 }
 
@@ -60,6 +65,7 @@ export function AddUrlModal({
     onSignIn,
     initialClipUrl,
     initialClipSection,
+    initialClipInfo,
     onClearInitialClipUrl,
 }: AddUrlModalProps) {
     const [activeTab, setActiveTab] = useState<'url' | 'clip'>('url')
@@ -82,11 +88,28 @@ export function AddUrlModal({
             setInputUrl(initialClipUrl)
             setClipSection(initialClipSection || null)
             setActiveTab('clip')
+            lastFetchedUrlRef.current = initialClipUrl
+
+            // If metadata is already known from the table item, use it instantly (0ms delay)
+            if (initialClipInfo?.title) {
+                setVideoInfo({
+                    title: initialClipInfo.title,
+                    author: initialClipInfo.author || 'YouTube',
+                    thumbnail: initialClipInfo.thumbnail || '',
+                    durationSeconds: initialClipSection?.endSeconds || 0,
+                    url: initialClipUrl,
+                    formats: [],
+                })
+                setLoadingPreview(false)
+                setPreviewError(null)
+                if (onClearInitialClipUrl) onClearInitialClipUrl()
+                return
+            }
+
             setLoadingPreview(true)
             setPreviewError(null)
-            lastFetchedUrlRef.current = initialClipUrl
             window.api.youtube
-                .getInfo(initialClipUrl)
+                .getQuickInfo(initialClipUrl)
                 .then((info) => {
                     setVideoInfo(info)
                 })
@@ -104,6 +127,7 @@ export function AddUrlModal({
         open,
         initialClipUrl,
         initialClipSection,
+        initialClipInfo,
         onClearInitialClipUrl,
         setInputUrl,
     ])
@@ -135,7 +159,7 @@ export function AddUrlModal({
                 if (cancelled) return
 
                 if (type === 'video') {
-                    const info = await window.api.youtube.getInfo(singleUrl)
+                    const info = await window.api.youtube.getQuickInfo(singleUrl)
                     if (cancelled) return
                     setVideoInfo(info)
                 } else {
