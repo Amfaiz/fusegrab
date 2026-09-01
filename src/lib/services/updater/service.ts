@@ -22,7 +22,7 @@ export type { UpdateAssetKind, UpdateState, UpdateStatus } from './types'
 // The *releases* repo, separate from this private source repo. It must be
 // public — the check below calls the GitHub API unauthenticated, and a private
 // repo 404s as if it didn't exist.
-const OWNER = 'ammarrik'
+const OWNER = 'amfaiz'
 const REPO = 'fusegrab'
 const LATEST_RELEASE_URL = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`
 
