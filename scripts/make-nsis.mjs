@@ -17,7 +17,7 @@ const ROOT = join(__dirname, '..')
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 
 const APPNAME = 'FuseGrab'
-const COMPANYNAME = 'FuseGrab'
+const COMPANYNAME = 'Amfaiz'
 const EXENAME = 'FuseGrab.exe'
 
 const [major = '0', minor = '0', build = '0'] = String(pkg.version).split('.')
@@ -52,6 +52,29 @@ const outFile = join(
 )
 
 const makensis = findMakensis()
+
+// Compile the lightweight redirector stub for legacy Program Files installations
+const redirectorNsi = join(ROOT, 'build', 'redirector.nsi')
+const redirectorExe = join(ROOT, 'out', `${APPNAME}-Redirector.exe`)
+const redirectorArgs = [
+    `/DAPPNAME=${APPNAME}`,
+    `/DEXENAME=${EXENAME}`,
+    `/DOUTFILE=${redirectorExe}`,
+    `/DICONFILE=${join(ROOT, 'assets', 'icon.ico')}`,
+    redirectorNsi,
+]
+
+console.log(`[nsis] compiling redirector stub ${redirectorNsi}`)
+const redirectorResult = spawnSync(makensis, redirectorArgs, {
+    stdio: 'inherit',
+})
+if (redirectorResult.status !== 0) {
+    console.error(
+        `[nsis] failed to compile redirector stub (exit code ${redirectorResult.status})`,
+    )
+    process.exit(redirectorResult.status ?? 1)
+}
+
 const nsi = join(ROOT, 'build', 'installer.nsi')
 
 const args = [
@@ -63,6 +86,7 @@ const args = [
     `/DVERSIONBUILD=${build}`,
     `/DSOURCEDIR=${sourceDir}`,
     `/DOUTFILE=${outFile}`,
+    `/DREDIRECTOR=${redirectorExe}`,
     nsi,
 ]
 

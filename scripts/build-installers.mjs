@@ -97,6 +97,53 @@ function runForgeMake(platform, arch) {
     return true
 }
 
+function runForgePackage(platform, arch) {
+    console.log(`\n==================================================`)
+    console.log(`[build-installers] Packaging for ${platform} (${arch})...`)
+    console.log(`==================================================\n`)
+    const keepAlivePath = join(ROOT, 'scripts', 'keep-alive.cjs')
+    const extraPaths =
+        process.platform === 'win32'
+            ? ''
+            : ':/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin'
+
+    const result = spawnSync(
+        process.execPath,
+        [
+            '--require',
+            keepAlivePath,
+            FORGE_BIN,
+            'package',
+            '--platform',
+            platform,
+            '--arch',
+            arch,
+        ],
+        {
+            cwd: ROOT,
+            stdio: 'inherit',
+            env: {
+                ...process.env,
+                ELECTRON_GET_SKIP_SUMMARY: '1',
+                PATH: `${process.env.PATH ?? ''}${extraPaths}`,
+            },
+        },
+    )
+    if (result.error) {
+        console.error(
+            `[build-installers] Failed to launch forge package for ${platform} (${arch}): ${result.error.message}`,
+        )
+        return false
+    }
+    if (result.status !== 0) {
+        console.error(
+            `[build-installers] Failed to package for ${platform} (${arch}) with exit code ${result.status}`,
+        )
+        return false
+    }
+    return true
+}
+
 // Wraps the already-packaged out/FuseGrab-win32-<arch> in the NSIS wizard
 // installer. Calls make-nsis.mjs directly instead of the make:nsis script,
 // which would re-run `package` over output forge just built.
@@ -107,18 +154,31 @@ function runMakeNsis(arch) {
         { cwd: ROOT, stdio: 'inherit' },
     )
     if (result.error) {
-        console.warn(
-            `[build-installers] Warning: could not launch NSIS build for ${arch}: ${result.error.message}`,
+        console.error(
+            `[build-installers] Error: could not launch NSIS build for ${arch}: ${result.error.message}`,
         )
         return false
     }
     if (result.status !== 0) {
-        console.warn(
-            `[build-installers] Warning: NSIS build for ${arch} failed.`,
+        console.error(
+            `[build-installers] Error: NSIS build for ${arch} failed.`,
         )
         return false
     }
     return true
+}
+
+function buildWindowsNsis(arch) {
+    const packaged = runForgePackage('win32', arch)
+    if (!packaged) return false
+    if (process.platform === 'win32') {
+        return runMakeNsis(arch)
+    } else {
+        console.warn(
+            `[build-installers] Warning: NSIS installer for win32 (${arch}) can only be compiled on a Windows host. App packaged in out/FuseGrab-win32-${arch}.`,
+        )
+        return true
+    }
 }
 
 let success = true
@@ -135,22 +195,26 @@ if (target === 'mac' || target === 'all') {
     }
 }
 
-if (target === 'win-arm' || target === 'win' || target === 'all') {
-    // Windows ARM64 (Windows on ARM)
-    const packaged = runForgeMake('win32', 'arm64')
-    success = packaged && success
-    if (packaged && process.platform === 'win32') {
-        runMakeNsis('arm64')
-    }
+if (
+    target === 'win-arm' ||
+    target === 'nsis-arm' ||
+    target === 'win' ||
+    target === 'nsis' ||
+    target === 'all'
+) {
+    // Windows ARM64 (NSIS)
+    success = buildWindowsNsis('arm64') && success
 }
 
-if (target === 'win-x64' || target === 'win' || target === 'all') {
-    // Windows 11 / 10 64-bit (x64)
-    const packaged = runForgeMake('win32', 'x64')
-    success = packaged && success
-    if (packaged && process.platform === 'win32') {
-        runMakeNsis('x64')
-    }
+if (
+    target === 'win-x64' ||
+    target === 'nsis-x64' ||
+    target === 'win' ||
+    target === 'nsis' ||
+    target === 'all'
+) {
+    // Windows 11 / 10 64-bit (x64) (NSIS)
+    success = buildWindowsNsis('x64') && success
 }
 
 // Summary of output artifacts

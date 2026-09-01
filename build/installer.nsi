@@ -13,13 +13,14 @@ Unicode true
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "LogicLib.nsh"
 
 ; ---- Configuration (overridable via makensis /D flags) ----------------------
 !ifndef APPNAME
   !define APPNAME "FuseGrab"
 !endif
 !ifndef COMPANYNAME
-  !define COMPANYNAME "FuseGrab"
+  !define COMPANYNAME "Amfaiz"
 !endif
 !ifndef EXENAME
   !define EXENAME "FuseGrab.exe"
@@ -39,6 +40,9 @@ Unicode true
 !ifndef OUTFILE
   !define OUTFILE "..\out\make\${APPNAME}-Setup-${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}.exe"
 !endif
+!ifndef REDIRECTOR
+  !define REDIRECTOR "..\out\${APPNAME}-Redirector.exe"
+!endif
 
 !define VERSION "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
@@ -46,9 +50,9 @@ Unicode true
 ; ---- Installer attributes ---------------------------------------------------
 Name "${APPNAME}"
 OutFile "${OUTFILE}"
-InstallDir "$PROGRAMFILES64\${APPNAME}"
-InstallDirRegKey HKLM "Software\${APPNAME}" "InstallDir"
-RequestExecutionLevel admin
+InstallDir "$LOCALAPPDATA\Programs\Amfaiz\${APPNAME}"
+InstallDirRegKey HKCU "Software\Amfaiz\${APPNAME}" "InstallDir"
+RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ShowInstDetails show
 ShowUninstDetails show
@@ -102,6 +106,23 @@ Function .onInit
     StrCpy $AutoUpdate "1"
 
 AutoUpdateDone:
+    ; Conditional elevation check:
+    ; Only request UAC elevation if an older full installation exists in Program Files
+    ; (identified by the existence of its resources or locales directory) and we are
+    ; not already running with Administrator privileges.
+    ${If} ${FileExists} "$PROGRAMFILES64\${APPNAME}\resources"
+    ${OrIf} ${FileExists} "$PROGRAMFILES64\${APPNAME}\locales"
+        UserInfo::GetAccountType
+        Pop $2
+        ${If} $2 != "Admin"
+            ClearErrors
+            ${GetParameters} $3
+            ExecShell "runas" '"$EXEPATH"' '$3'
+            ${IfNot} ${Errors}
+                Quit
+            ${EndIf}
+        ${EndIf}
+    ${EndIf}
 FunctionEnd
 
 ; ---- Helpers ----------------------------------------------------------------
@@ -136,33 +157,66 @@ Section "Install"
     StrCmp $0 "0" 0 +2
       Sleep 2000
 
+    ; If upgrading from an older system-wide Program Files installation,
+    ; clean up the heavy files from Program Files and leave a lightweight
+    ; redirector stub in place so existing user shortcuts and taskbar pins
+    ; keep working without disruption.
+    ${If} ${FileExists} "$PROGRAMFILES64\${APPNAME}\resources"
+    ${OrIf} ${FileExists} "$PROGRAMFILES64\${APPNAME}\locales"
+        RMDir /r "$PROGRAMFILES64\${APPNAME}\locales"
+        RMDir /r "$PROGRAMFILES64\${APPNAME}\resources"
+        Delete "$PROGRAMFILES64\${APPNAME}\*.dll"
+        Delete "$PROGRAMFILES64\${APPNAME}\*.pak"
+        Delete "$PROGRAMFILES64\${APPNAME}\*.bin"
+        Delete "$PROGRAMFILES64\${APPNAME}\*.dat"
+        Delete "$PROGRAMFILES64\${APPNAME}\*.json"
+        Delete "$PROGRAMFILES64\${APPNAME}\v8_context_snapshot.bin"
+        Delete "$PROGRAMFILES64\${APPNAME}\vk_swiftshader.dll"
+        Delete "$PROGRAMFILES64\${APPNAME}\Uninstall.exe"
+
+        ${If} ${FileExists} "${REDIRECTOR}"
+            File "/oname=$PROGRAMFILES64\${APPNAME}\${EXENAME}" "${REDIRECTOR}"
+        ${EndIf}
+
+        ; Remove old HKLM registry to prevent duplicate entries in Add/Remove Programs
+        DeleteRegKey HKLM "${UNINSTKEY}"
+        DeleteRegKey HKLM "Software\${APPNAME}"
+        DeleteRegKey HKLM "Software\Amfaiz\${APPNAME}"
+
+        ; Clean up old system-wide shortcuts
+        Delete "$COMMONDESKTOP\${APPNAME}.lnk"
+        Delete "$COMMONPROGRAMS\${APPNAME}\${APPNAME}.lnk"
+        RMDir "$COMMONPROGRAMS\${APPNAME}"
+    ${EndIf}
+
     SetOutPath "$INSTDIR"
     File /r "${SOURCEDIR}\*.*"
 
     ; Shortcuts
-    CreateDirectory "$SMPROGRAMS\${APPNAME}"
-    CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\${EXENAME}"
+    CreateDirectory "$SMPROGRAMS\Amfaiz"
+    CreateShortcut "$SMPROGRAMS\Amfaiz\${APPNAME}.lnk" "$INSTDIR\${EXENAME}"
+    CreateShortcut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\${EXENAME}"
     CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${EXENAME}"
 
     ; Uninstaller
     WriteUninstaller "$INSTDIR\Uninstall.exe"
-    WriteRegStr HKLM "Software\${APPNAME}" "InstallDir" "$INSTDIR"
+    WriteRegStr HKCU "Software\Amfaiz\${APPNAME}" "InstallDir" "$INSTDIR"
 
-    ; Add/Remove Programs entry
-    WriteRegStr HKLM "${UNINSTKEY}" "DisplayName" "${APPNAME}"
-    WriteRegStr HKLM "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
-    WriteRegStr HKLM "${UNINSTKEY}" "Publisher" "${COMPANYNAME}"
-    WriteRegStr HKLM "${UNINSTKEY}" "DisplayIcon" "$INSTDIR\${EXENAME}"
-    WriteRegStr HKLM "${UNINSTKEY}" "InstallLocation" "$INSTDIR"
-    WriteRegStr HKLM "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
-    WriteRegStr HKLM "${UNINSTKEY}" "QuietUninstallString" "$\"$INSTDIR\Uninstall.exe$\" /S"
-    WriteRegDWORD HKLM "${UNINSTKEY}" "NoModify" 1
-    WriteRegDWORD HKLM "${UNINSTKEY}" "NoRepair" 1
+    ; Add/Remove Programs entry (registered in HKCU for per-user install)
+    WriteRegStr HKCU "${UNINSTKEY}" "DisplayName" "${APPNAME}"
+    WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
+    WriteRegStr HKCU "${UNINSTKEY}" "Publisher" "${COMPANYNAME}"
+    WriteRegStr HKCU "${UNINSTKEY}" "DisplayIcon" "$INSTDIR\${EXENAME}"
+    WriteRegStr HKCU "${UNINSTKEY}" "InstallLocation" "$INSTDIR"
+    WriteRegStr HKCU "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+    WriteRegStr HKCU "${UNINSTKEY}" "QuietUninstallString" "$\"$INSTDIR\Uninstall.exe$\" /S"
+    WriteRegDWORD HKCU "${UNINSTKEY}" "NoModify" 1
+    WriteRegDWORD HKCU "${UNINSTKEY}" "NoRepair" 1
 
     ; Report install size to Add/Remove Programs (KB)
     ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
     IntFmt $0 "0x%08X" $0
-    WriteRegDWORD HKLM "${UNINSTKEY}" "EstimatedSize" "$0"
+    WriteRegDWORD HKCU "${UNINSTKEY}" "EstimatedSize" "$0"
 
     ; In silent and visible auto-update installs there's no Finish page to
     ; relaunch from, so start the app ourselves — de-elevated, same as the
@@ -178,12 +232,18 @@ SectionEnd
 
 ; ---- Uninstall --------------------------------------------------------------
 Section "Uninstall"
-    Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
-    RMDir "$SMPROGRAMS\${APPNAME}"
+    Delete "$SMPROGRAMS\${APPNAME}.lnk"
+    Delete "$SMPROGRAMS\Amfaiz\${APPNAME}.lnk"
+    RMDir "$SMPROGRAMS\Amfaiz"
     Delete "$DESKTOP\${APPNAME}.lnk"
+
+    ; Clean up legacy redirector if present
+    Delete "$PROGRAMFILES64\${APPNAME}\${EXENAME}"
+    RMDir "$PROGRAMFILES64\${APPNAME}"
 
     RMDir /r "$INSTDIR"
 
-    DeleteRegKey HKLM "${UNINSTKEY}"
-    DeleteRegKey HKLM "Software\${APPNAME}"
+    DeleteRegKey HKCU "${UNINSTKEY}"
+    DeleteRegKey HKCU "Software\Amfaiz\${APPNAME}"
+    DeleteRegKey HKCU "Software\${APPNAME}"
 SectionEnd

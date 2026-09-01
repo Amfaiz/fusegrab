@@ -3,7 +3,7 @@
     "version": "1.5.0",
     "private": true,
     "description": "FuseGrab — download YouTube videos.",
-    "author": "FuseGrab",
+    "author": "Amfaiz",
     "type": "module",
     "main": ".vite/build/main.js",
     "imports": {

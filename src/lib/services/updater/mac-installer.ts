@@ -249,6 +249,9 @@ export async function installMacDmg(
             stdio: 'ignore',
         },
     )
+    child.once('error', (err) => {
+        console.error('[updater] Failed to spawn macOS relaunch script:', err)
+    })
     child.unref()
     app.quit()
     return true

@@ -137,19 +137,6 @@ const config = {
     rebuildConfig: {},
     makers: [
         {
-            name: '@electron-forge/maker-squirrel',
-            platforms: ['win32'],
-            config: {
-                // Installer + Add/Remove Programs icon on Windows.
-                setupIcon: './assets/icon.ico',
-            },
-        },
-        {
-            name: '@electron-forge/maker-zip',
-            platforms: ['darwin', 'win32'],
-            config: {},
-        },
-        {
             // macOS drag-to-install disk image. Uses the same .icns as the app
             // bundle for the volume icon. appdmg (pulled in transitively) needs
             // the fs-xattr / macos-alias native modules compiled — they're in
@@ -160,6 +147,11 @@ const config = {
                 icon: './assets/icon.icns',
                 overwrite: true,
             },
+        },
+        {
+            name: '@electron-forge/maker-zip',
+            platforms: ['darwin'],
+            config: {},
         },
     ],
     plugins: [
