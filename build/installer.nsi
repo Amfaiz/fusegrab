@@ -40,10 +40,6 @@ Unicode true
 !ifndef OUTFILE
   !define OUTFILE "..\out\make\${APPNAME}-Setup-${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}.exe"
 !endif
-!ifndef REDIRECTOR
-  !define REDIRECTOR "..\out\${APPNAME}-Redirector.exe"
-!endif
-
 !define VERSION "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
 
@@ -107,20 +103,15 @@ Function .onInit
 
 AutoUpdateDone:
     ; Conditional elevation check:
-    ; Only request UAC elevation if an older full installation exists in Program Files
-    ; (identified by the existence of its resources or locales directory) and we are
-    ; not already running with Administrator privileges.
-    ${If} ${FileExists} "$PROGRAMFILES64\${APPNAME}\resources"
-    ${OrIf} ${FileExists} "$PROGRAMFILES64\${APPNAME}\locales"
+    ; Only request UAC elevation if an older installation exists in Program Files
+    ; with an uninstaller and we are not already running with Administrator privileges.
+    ${If} ${FileExists} "$PROGRAMFILES64\${APPNAME}\Uninstall.exe"
         UserInfo::GetAccountType
         Pop $2
         ${If} $2 != "Admin"
-            ClearErrors
             ${GetParameters} $3
             ExecShell "runas" '"$EXEPATH"' '$3'
-            ${IfNot} ${Errors}
-                Quit
-            ${EndIf}
+            Quit
         ${EndIf}
     ${EndIf}
 FunctionEnd
@@ -157,36 +148,23 @@ Section "Install"
     StrCmp $0 "0" 0 +2
       Sleep 2000
 
-    ; If upgrading from an older system-wide Program Files installation,
-    ; clean up the heavy files from Program Files and leave a lightweight
-    ; redirector stub in place so existing user shortcuts and taskbar pins
-    ; keep working without disruption.
-    ${If} ${FileExists} "$PROGRAMFILES64\${APPNAME}\resources"
-    ${OrIf} ${FileExists} "$PROGRAMFILES64\${APPNAME}\locales"
-        RMDir /r "$PROGRAMFILES64\${APPNAME}\locales"
-        RMDir /r "$PROGRAMFILES64\${APPNAME}\resources"
-        Delete "$PROGRAMFILES64\${APPNAME}\*.dll"
-        Delete "$PROGRAMFILES64\${APPNAME}\*.pak"
-        Delete "$PROGRAMFILES64\${APPNAME}\*.bin"
-        Delete "$PROGRAMFILES64\${APPNAME}\*.dat"
-        Delete "$PROGRAMFILES64\${APPNAME}\*.json"
-        Delete "$PROGRAMFILES64\${APPNAME}\v8_context_snapshot.bin"
-        Delete "$PROGRAMFILES64\${APPNAME}\vk_swiftshader.dll"
+    ; If an older installation exists in Program Files, run its uninstaller silently
+    ${If} ${FileExists} "$PROGRAMFILES64\${APPNAME}\Uninstall.exe"
+        DetailPrint "Uninstalling previous version from Program Files..."
+        ClearErrors
+        ExecWait '"$PROGRAMFILES64\${APPNAME}\Uninstall.exe" /S _?=$PROGRAMFILES64\${APPNAME}' $0
         Delete "$PROGRAMFILES64\${APPNAME}\Uninstall.exe"
+        RMDir /r "$PROGRAMFILES64\${APPNAME}"
 
-        ${If} ${FileExists} "${REDIRECTOR}"
-            File "/oname=$PROGRAMFILES64\${APPNAME}\${EXENAME}" "${REDIRECTOR}"
-        ${EndIf}
-
-        ; Remove old HKLM registry to prevent duplicate entries in Add/Remove Programs
+        ; Ensure legacy system-wide registry entries and shortcuts are cleaned up
         DeleteRegKey HKLM "${UNINSTKEY}"
         DeleteRegKey HKLM "Software\${APPNAME}"
-        DeleteRegKey HKLM "Software\Amfaiz\${APPNAME}"
-
-        ; Clean up old system-wide shortcuts
-        Delete "$COMMONDESKTOP\${APPNAME}.lnk"
-        Delete "$COMMONPROGRAMS\${APPNAME}\${APPNAME}.lnk"
-        RMDir "$COMMONPROGRAMS\${APPNAME}"
+        SetShellVarContext all
+        Delete "$DESKTOP\${APPNAME}.lnk"
+        Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
+        Delete "$SMPROGRAMS\${APPNAME}.lnk"
+        RMDir "$SMPROGRAMS\${APPNAME}"
+        SetShellVarContext current
     ${EndIf}
 
     SetOutPath "$INSTDIR"
@@ -236,10 +214,6 @@ Section "Uninstall"
     Delete "$SMPROGRAMS\Amfaiz\${APPNAME}.lnk"
     RMDir "$SMPROGRAMS\Amfaiz"
     Delete "$DESKTOP\${APPNAME}.lnk"
-
-    ; Clean up legacy redirector if present
-    Delete "$PROGRAMFILES64\${APPNAME}\${EXENAME}"
-    RMDir "$PROGRAMFILES64\${APPNAME}"
 
     RMDir /r "$INSTDIR"
 

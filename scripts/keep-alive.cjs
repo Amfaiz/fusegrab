@@ -12,8 +12,9 @@
 // loop is empty, and the interval is precisely what keeps it non-empty. So gate
 // on argv instead and never arm the timer in the helper processes.
 const isForgeCli = process.argv.some((arg) => /electron-forge/.test(arg))
+const isForgeMake = isForgeCli && process.argv.includes('make')
 
-if (isForgeCli) {
+if (isForgeMake) {
     const timer = setInterval(() => {}, 1000)
 
     // Forge's make CLI never calls process.exit(): once api.make() resolves,

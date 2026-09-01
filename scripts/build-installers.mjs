@@ -6,7 +6,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -101,7 +101,6 @@ function runForgePackage(platform, arch) {
     console.log(`\n==================================================`)
     console.log(`[build-installers] Packaging for ${platform} (${arch})...`)
     console.log(`==================================================\n`)
-    const keepAlivePath = join(ROOT, 'scripts', 'keep-alive.cjs')
     const extraPaths =
         process.platform === 'win32'
             ? ''
@@ -109,16 +108,7 @@ function runForgePackage(platform, arch) {
 
     const result = spawnSync(
         process.execPath,
-        [
-            '--require',
-            keepAlivePath,
-            FORGE_BIN,
-            'package',
-            '--platform',
-            platform,
-            '--arch',
-            arch,
-        ],
+        [FORGE_BIN, 'package', '--platform', platform, '--arch', arch],
         {
             cwd: ROOT,
             stdio: 'inherit',
@@ -247,7 +237,7 @@ if (existsSync(makeDir)) {
         console.log('No files found in out/make.')
     } else {
         files.forEach((f) => {
-            console.log(`- ${f.path.replace(ROOT + '/', '')} (${f.sizeMB} MB)`)
+            console.log(`- ${relative(ROOT, f.path)} (${f.sizeMB} MB)`)
         })
     }
 } else {
