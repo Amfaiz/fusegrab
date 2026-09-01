@@ -25,6 +25,7 @@ export class SessionLogger {
     private logFilePath: string | null = null
     private downloadRootDir: string | null = null
     private hasError = false
+    private hasFailedDownload = false
     private active = false
     private sessionStartTime: string
 
@@ -132,6 +133,7 @@ export class SessionLogger {
         if (!this.active || !this.logFilePath) return
         if (!wasSuccessful) {
             this.hasError = true
+            this.hasFailedDownload = true
         }
         const timestamp = new Date().toISOString()
         const status = wasSuccessful ? 'SUCCEEDED' : 'FAILED'
@@ -218,6 +220,7 @@ export class SessionLogger {
 
         if (!wasSuccessful) {
             this.hasError = true
+            this.hasFailedDownload = true
         }
 
         const timestamp = new Date().toISOString()
@@ -228,7 +231,7 @@ export class SessionLogger {
             `\n================================================================================`,
             `[${timestamp}] APP SESSION ENDED: ${endStatus}`,
             `[${timestamp}] Canonical log: ${this.logFilePath}`,
-            ...(this.hasError && this.downloadRootDir
+            ...(this.hasFailedDownload && this.downloadRootDir
                 ? [
                       `[${timestamp}] Error copy will be saved to: ${path.join(
                           this.downloadRootDir,
@@ -241,7 +244,7 @@ export class SessionLogger {
 
         this.write(footer)
 
-        if (this.hasError && this.downloadRootDir) {
+        if (this.hasFailedDownload && this.downloadRootDir) {
             try {
                 const errorLogPath = path.join(
                     this.downloadRootDir,

@@ -131,6 +131,26 @@ describe('SessionLogger', () => {
         expect(readdirSync(downloadDir)).toHaveLength(0)
     })
 
+    it('does not copy to download root if fallback succeeds, but retains log in logs dir', () => {
+        const logger = new SessionLogger(logsDir)
+        logger.setDownloadRoot(downloadDir)
+        logger.startSession('FuseGrab Application')
+
+        logger.startDownload('Video A')
+        logger.error('Attempt 1 failed', new Error('Bot check encountered'))
+        logger.endDownload('Video A', true)
+        logger.endSession(true)
+
+        expect(readdirSync(downloadDir)).toHaveLength(0)
+        expect(sessionLogs()).toHaveLength(1)
+        const content = readFileSync(
+            path.join(logsDir, sessionLogs()[0]),
+            'utf-8',
+        )
+        expect(content).toContain('Attempt 1 failed')
+        expect(content).toContain('DOWNLOAD SUCCEEDED: Video A')
+    })
+
     it('flags the session when yt-dlp writes an error to stderr', () => {
         const logger = new SessionLogger(logsDir)
         logger.startSession('FuseGrab Application')
