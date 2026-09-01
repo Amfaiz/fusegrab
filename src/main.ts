@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, session, shell } from 'electron'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -233,6 +233,34 @@ app.on('ready', async () => {
 
     // Clear any installer left in temp by a previous (now-applied) update.
     await cleanupStaleInstallers()
+
+    // Embedded YouTube players require a valid HTTP/HTTPS Referer header to
+    // verify embedder identity. In packaged desktop builds where the UI is
+    // loaded from file:// (or whenever Referer is stripped by Chromium cross-origin
+    // policies), YouTube throws "Error 153: Video player configuration error".
+    // Intercept YouTube embed and media requests from the default session to
+    // provide a valid Referer and Origin.
+    const EMBED_ORIGIN = 'https://fusegrab.app'
+    session.defaultSession.webRequest.onBeforeSendHeaders(
+        {
+            urls: [
+                '*://*.youtube.com/*',
+                '*://*.youtube-nocookie.com/*',
+                '*://*.googlevideo.com/*',
+            ],
+        },
+        (details, callback) => {
+            const referer = details.requestHeaders['Referer']
+            if (!referer || referer.startsWith('file://')) {
+                details.requestHeaders['Referer'] = `${EMBED_ORIGIN}/`
+            }
+            const origin = details.requestHeaders['Origin']
+            if (!origin || origin === 'null' || origin.startsWith('file://')) {
+                details.requestHeaders['Origin'] = EMBED_ORIGIN
+            }
+            callback({ cancel: false, requestHeaders: details.requestHeaders })
+        },
+    )
 
     createWindow()
 

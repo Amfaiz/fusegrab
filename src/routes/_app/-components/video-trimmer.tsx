@@ -466,8 +466,9 @@ export function VideoTrimmer({
                     <iframe
                         ref={iframeRef}
                         title={info.title}
-                        src={`https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&version=3&playerapiid=ytplayer&controls=1&rel=0&modestbranding=1&origin=${window.location.origin}`}
+                        src={`https://www.youtube.com/embed/${videoId}?enablejsapi=1&controls=1&rel=0&modestbranding=1`}
                         className="h-full w-full border-0"
+                        referrerPolicy="strict-origin-when-cross-origin"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         allowFullScreen
                     />
