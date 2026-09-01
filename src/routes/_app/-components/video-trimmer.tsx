@@ -49,9 +49,7 @@ export function VideoTrimmer({
     const videoId = extractYoutubeVideoId(url)
     const initialDuration = Math.max(
         1,
-        Math.round(
-            info.durationSeconds || initialSection?.endSeconds || 60,
-        ),
+        Math.round(info.durationSeconds || initialSection?.endSeconds || 60),
     )
     const [totalDuration, setTotalDuration] = useState(initialDuration)
 
@@ -104,6 +102,12 @@ export function VideoTrimmer({
 
     const startSecondsRef = useRef(startSeconds)
     const endSecondsRef = useRef(endSeconds)
+    const hasResolvedDurationRef = useRef(
+        Boolean(
+            (info.durationSeconds && info.durationSeconds > 0) ||
+            initialSection?.endSeconds,
+        ),
+    )
 
     useEffect(() => {
         startSecondsRef.current = startSeconds
@@ -178,7 +182,11 @@ export function VideoTrimmer({
 
                 if (!data || typeof data !== 'object') return
 
-                if (data.event === 'infoDelivery' && data.info) {
+                if (
+                    (data.event === 'infoDelivery' ||
+                        data.event === 'initialDelivery') &&
+                    data.info
+                ) {
                     const reportedDuration =
                         typeof data.info.duration === 'number'
                             ? data.info.duration
@@ -189,12 +197,17 @@ export function VideoTrimmer({
 
                     if (reportedDuration && reportedDuration > 0) {
                         const dur = Math.max(1, Math.round(reportedDuration))
+                        const isFirstResolution =
+                            !hasResolvedDurationRef.current
+                        hasResolvedDurationRef.current = true
+
                         setTotalDuration((prevDur) => {
-                            if (prevDur !== dur) {
+                            if (prevDur !== dur || isFirstResolution) {
                                 setEndSeconds((prevEnd) => {
                                     if (
                                         !initialSection &&
-                                        (prevEnd === prevDur ||
+                                        (isFirstResolution ||
+                                            prevEnd === prevDur ||
                                             prevEnd === 60 ||
                                             prevEnd > dur)
                                     ) {
@@ -217,6 +230,15 @@ export function VideoTrimmer({
                             pauseVideo()
                             seekTo(startSecondsRef.current)
                         }
+                    }
+                }
+
+                if (data.event === 'onReady') {
+                    if (iframeRef.current?.contentWindow) {
+                        iframeRef.current.contentWindow.postMessage(
+                            JSON.stringify({ event: 'listening' }),
+                            '*',
+                        )
                     }
                 }
 
@@ -471,6 +493,14 @@ export function VideoTrimmer({
                         referrerPolicy="strict-origin-when-cross-origin"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         allowFullScreen
+                        onLoad={() => {
+                            if (iframeRef.current?.contentWindow) {
+                                iframeRef.current.contentWindow.postMessage(
+                                    JSON.stringify({ event: 'listening' }),
+                                    '*',
+                                )
+                            }
+                        }}
                     />
                 ) : (
                     <div className="relative flex h-full w-full items-center justify-center">
@@ -552,14 +582,14 @@ export function VideoTrimmer({
                         className="relative flex h-5 w-full cursor-pointer items-center"
                     >
                         {/* Full Track Rail (Light Grey Background) */}
-                        <div className="h-[3px] w-full rounded-full bg-neutral-200 dark:bg-neutral-700" />
+                        <div className="h-0.75 w-full rounded-full bg-neutral-200 dark:bg-neutral-700" />
 
                         {/* Selected Active Range Rail (Dark Charcoal / Black) */}
                         <div
                             onPointerDown={(e) =>
                                 handleTimelinePointerDown(e, 'middle')
                             }
-                            className="absolute h-[3px] cursor-grab rounded-full bg-neutral-800 active:cursor-grabbing dark:bg-neutral-100"
+                            className="absolute h-0.75 cursor-grab rounded-full bg-neutral-800 active:cursor-grabbing dark:bg-neutral-100"
                             style={{
                                 left: `${startPercent}%`,
                                 width: `${Math.max(0, endPercent - startPercent)}%`,
